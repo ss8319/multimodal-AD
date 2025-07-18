@@ -1,0 +1,24 @@
+[tool.poetry]
+name = "adni"
+version = "0.1.0"
+description = ""
+authors = ["ss8319 <sszy1212@gmail.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.11"
+pandas = "^2.3.0"
+pydicom = "^3.0.1"
+matplotlib = "^3.10.3"
+nibabel = "^5.3.2"
+nilearn = "^0.11.1"
+scikit-image = "^0.25.2"
+openpyxl = "^3.1.5"
+
+
+[tool.poetry.group.dev.dependencies]
+ipykernel = "^6.29.5"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

@@ -1,0 +1,10 @@
+# Ignore these folders (relative to repo root)
+ADNI/
+morphometry_results/
+Papers/
+MRI/
+
+# Ignore all PDF, CSV, and ZIP files anywhere in the repo
+*.pdf
+*.csv
+*.zip
