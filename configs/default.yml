@@ -1,0 +1,52 @@
+# Default configuration for protein autoencoder pipeline
+
+# Model parameters
+hidden_size: 8
+dropout_rate: 0.1
+
+# Training parameters
+num_epochs: 200
+learning_rate: 0.001
+patience: 20
+batch_size: 16
+weight_decay: 1.0e-5
+
+# Data parameters
+test_size: 0.2
+random_state: 42
+
+# File paths
+base_path: "D:\\ADNI\\AD_CN\\proteomics\\Biomarkers Consortium Plasma Proteomics MRM"
+
+# Dataset configurations
+datasets:
+  mrm_small:
+    name: mrm_small
+    metadata_path: "D:\\ADNI\\AD_CN\\proteomics\\Biomarkers Consortium Plasma Proteomics MRM\\metadata.csv"
+    exclude_columns:
+      - RID
+      - VISCODE
+      - MRI_acquired
+      - research_group
+      - subject_age
+  
+  mrm_large:
+    name: mrm_large
+    metadata_path: "D:\\ADNI\\AD_CN\\proteomics\\Biomarkers Consortium Plasma Proteomics MRM\\metadata_large.csv"
+    exclude_columns:
+      - RID
+      - VISCODE
+      - MRI_acquired
+      - research_group
+      - subject_age
+  
+  # Add more datasets as needed
+  # custom_dataset:
+  #   name: custom_dataset
+  #   metadata_path: "path/to/your/metadata.csv"
+  #   exclude_columns:
+  #     - RID
+  #     - VISCODE
+  #     - MRI_acquired
+  #     - research_group
+  #     - subject_age 
