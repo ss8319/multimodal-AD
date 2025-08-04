@@ -1,0 +1,39 @@
+
+EXPERIMENT SUMMARY
+==================
+
+Dataset: proteomic_full
+Experiment Directory: D:\ADNI\AD_CN\proteomics\Biomarkers Consortium Plasma Proteomics MRM\proteomic_full\proteomic_full_experiment
+Timestamp: 2025-07-29 14:22:47
+
+MODEL PARAMETERS:
+- Hidden size: 8
+- Dropout rate: 0.1
+- Input features: 8
+
+TRAINING PARAMETERS:
+- Epochs: 200
+- Learning rate: 0.001
+- Batch size: 16
+- Patience: 20
+- Weight decay: 1e-05
+
+DATA:
+- Training samples: 126
+- Test samples: 32
+- Feature dimension: 8
+
+RESULTS:
+- Final train loss: 0.365119
+- Final validation loss: 0.304824
+- Best validation loss: 0.300999
+- Training epochs: 151
+
+FILES SAVED:
+- Model: D:\ADNI\AD_CN\proteomics\Biomarkers Consortium Plasma Proteomics MRM\proteomic_full\proteomic_full_experiment\best_autoencoder.pth
+- Training curves: D:\ADNI\AD_CN\proteomics\Biomarkers Consortium Plasma Proteomics MRM\proteomic_full\proteomic_full_experiment\training_curves.png
+- Train features: D:\ADNI\AD_CN\proteomics\Biomarkers Consortium Plasma Proteomics MRM\proteomic_full\proteomic_full_experiment\train_features_autoencoder.npy
+- Test features: D:\ADNI\AD_CN\proteomics\Biomarkers Consortium Plasma Proteomics MRM\proteomic_full\proteomic_full_experiment\test_features_autoencoder.npy
+- Scaler: D:\ADNI\AD_CN\proteomics\Biomarkers Consortium Plasma Proteomics MRM\proteomic_full\proteomic_full_experiment\scaler.pkl
+- Config snapshot: D:\ADNI\AD_CN\proteomics\Biomarkers Consortium Plasma Proteomics MRM\proteomic_full\proteomic_full_experiment\config_snapshot.yml
+- Training log: D:\ADNI\AD_CN\proteomics\Biomarkers Consortium Plasma Proteomics MRM\proteomic_full\proteomic_full_experiment\training_log.txt

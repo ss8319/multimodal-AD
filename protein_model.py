@@ -17,11 +17,11 @@ class ProteinAutoencoder(nn.Module):
     def __init__(self, input_size: int, hidden_size: int = 8, dropout_rate: float = 0.1):
         super().__init__()
         self.encoder = nn.Sequential(
-            nn.Linear(input_size, hidden_size * 2),
+            nn.Linear(input_size, hidden_size * 2), # input_size -> hidden_size * 2
             nn.BatchNorm1d(hidden_size * 2),
             nn.PReLU(),
             nn.Dropout(dropout_rate),
-            nn.Linear(hidden_size * 2, hidden_size),
+            nn.Linear(hidden_size * 2, hidden_size), # (BOTTLENECK) hidden_size * 2 -> hidden_size
             nn.BatchNorm1d(hidden_size),
             nn.PReLU(),
         )
@@ -211,7 +211,7 @@ def extract_features(model: nn.Module, data_loader) -> np.ndarray:
     features = []
     with torch.no_grad():
         for batch_x, _ in data_loader:
-            hidden_features = model.extract_features(batch_x)
+            hidden_features = model.extract_features(batch_x) # Get the bottleneck features
             features.append(hidden_features.numpy())
     return np.concatenate(features, axis=0)
 
@@ -230,6 +230,8 @@ def load_and_prepare_data(metadata_path: str, exclude_columns: list) -> Tuple[np
     X = np.nan_to_num(X, nan=0.0)
     
     # Scale features
+    # StandardScaler does: (x - mean) / std
+    # Result: mean=0, std=1 for each feature
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
     
@@ -283,7 +285,7 @@ def train_autoencoder_pipeline(config: 'AutoencoderConfig', dataset_config: 'Dat
     train_loader, test_loader = create_data_loaders(X_train, X_test, config.batch_size)
     
     # Initialize model
-    input_size = len(proteomic_cols)
+    input_size = len(proteomic_cols) # number of features
     model = ProteinAutoencoder(input_size, config.hidden_size, config.dropout_rate)
     logger.info(f"Model initialized: {input_size} -> {config.hidden_size} -> {input_size}")
     

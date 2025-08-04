@@ -9,6 +9,7 @@ import pandas as pd
 from sklearn.metrics import silhouette_score, accuracy_score
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.metrics.pairwise import euclidean_distances
+from sklearn.model_selection import train_test_split
 from typing import Dict, Any
 import os
 from datetime import datetime
@@ -20,6 +21,7 @@ try:
 except ImportError:
     UMAP_AVAILABLE = False
     print("Warning: UMAP not available. UMAP visualization will be skipped.")
+
 
 def find_latest_experiment(config: 'AutoencoderConfig', dataset_name: str) -> str:
     """Find the most recent experiment directory for a dataset"""
@@ -35,6 +37,7 @@ def find_latest_experiment(config: 'AutoencoderConfig', dataset_name: str) -> st
     experiments.sort(key=lambda x: os.path.getctime(os.path.join(dataset_path, x)), reverse=True)
     return os.path.join(dataset_path, experiments[0])
 
+
 def get_experiment_paths(config: 'AutoencoderConfig', dataset_name: str, experiment_dir: str = None) -> Dict[str, str]:
     """Get paths for a specific experiment"""
     if experiment_dir is None:
@@ -43,19 +46,19 @@ def get_experiment_paths(config: 'AutoencoderConfig', dataset_name: str, experim
     experiment_name = os.path.basename(experiment_dir)
     return config.get_paths(dataset_name, experiment_name)
 
+
 def load_visualization_data(dataset_config: 'DatasetConfig', paths: Dict[str, str]) -> Dict[str, Any]:
     """Load data for visualization"""
     train_features = np.load(paths['train_features'])
     test_features = np.load(paths['test_features'])
-    
+
     # Load original data for labels
     df = pd.read_csv(dataset_config.metadata_path)
     y = (df['research_group'] == 'AD').astype(int)
-    
+
     # Split labels to match train/test split
-    from sklearn.model_selection import train_test_split
     _, _, y_train, y_test = train_test_split(df, y, test_size=0.2, random_state=42, stratify=y)
-    
+
     return {
         'train_features': train_features,
         'test_features': test_features,
@@ -63,13 +66,14 @@ def load_visualization_data(dataset_config: 'DatasetConfig', paths: Dict[str, st
         'y_test': y_test
     }
 
+
 def plot_feature_quality_analysis(data: Dict[str, Any], save_path: str):
     """Plot feature quality analysis"""
     train_features = data['train_features']
     test_features = data['test_features']
     
     plt.figure(figsize=(20, 5))
-    
+
     # Feature distribution
     plt.subplot(1, 4, 1)
     plt.hist(train_features.flatten(), bins=50, alpha=0.7, density=True, label='Train')
@@ -78,7 +82,7 @@ def plot_feature_quality_analysis(data: Dict[str, Any], save_path: str):
     plt.xlabel('Feature Values')
     plt.ylabel('Density')
     plt.legend()
-    
+
     # Feature variance
     plt.subplot(1, 4, 2)
     feature_vars = np.var(train_features, axis=0)
@@ -86,7 +90,7 @@ def plot_feature_quality_analysis(data: Dict[str, Any], save_path: str):
     plt.title('Feature Variance')
     plt.xlabel('Feature Index')
     plt.ylabel('Variance')
-    
+
     # Feature correlation
     plt.subplot(1, 4, 3)
     feature_corr = np.corrcoef(train_features.T)
@@ -94,7 +98,7 @@ def plot_feature_quality_analysis(data: Dict[str, Any], save_path: str):
                 xticklabels=range(1, train_features.shape[1]+1),
                 yticklabels=range(1, train_features.shape[1]+1))
     plt.title('Feature Correlation')
-    
+
     # Feature importance (LDA)
     plt.subplot(1, 4, 4)
     lda = LinearDiscriminantAnalysis()
@@ -104,10 +108,11 @@ def plot_feature_quality_analysis(data: Dict[str, Any], save_path: str):
     plt.title('Feature Importance (LDA)')
     plt.xlabel('Feature Index')
     plt.ylabel('|LDA Coefficient|')
-    
+
     plt.tight_layout()
     plt.savefig(save_path, dpi=300, bbox_inches='tight')
     plt.close()
+
 
 def plot_dimensionality_reduction(data: Dict[str, Any], save_path: str):
     """Plot dimensionality reduction visualizations"""
@@ -117,26 +122,26 @@ def plot_dimensionality_reduction(data: Dict[str, Any], save_path: str):
     y_test = data['y_test']
     
     plt.figure(figsize=(20, 10))
-    
+
     # PCA
     pca = PCA(n_components=2)
     train_pca = pca.fit_transform(train_features)
     test_pca = pca.transform(test_features)
-    
+
     plt.subplot(2, 3, 1)
     scatter = plt.scatter(train_pca[:, 0], train_pca[:, 1], c=y_train, cmap='viridis', alpha=0.7)
     plt.title(f'PCA (Train)\nExplained variance: {pca.explained_variance_ratio_.sum():.2%}')
     plt.xlabel(f'PC1 ({pca.explained_variance_ratio_[0]:.1%})')
     plt.ylabel(f'PC2 ({pca.explained_variance_ratio_[1]:.1%})')
     plt.colorbar(scatter, label='AD (1) vs CN (0)')
-    
+
     plt.subplot(2, 3, 2)
     scatter = plt.scatter(test_pca[:, 0], test_pca[:, 1], c=y_test, cmap='viridis', alpha=0.7)
     plt.title('PCA (Test)')
     plt.xlabel(f'PC1 ({pca.explained_variance_ratio_[0]:.1%})')
     plt.ylabel(f'PC2 ({pca.explained_variance_ratio_[1]:.1%})')
     plt.colorbar(scatter, label='AD (1) vs CN (0)')
-    
+
     # t-SNE
     if len(train_features) > 10:
         tsne = TSNE(n_components=2, random_state=42, perplexity=min(30, len(train_features)-1))
@@ -148,7 +153,7 @@ def plot_dimensionality_reduction(data: Dict[str, Any], save_path: str):
         plt.xlabel('t-SNE 1')
         plt.ylabel('t-SNE 2')
         plt.colorbar(scatter, label='AD (1) vs CN (0)')
-    
+
     # UMAP
     if len(train_features) > 10 and UMAP_AVAILABLE:
         try:
@@ -175,14 +180,14 @@ def plot_dimensionality_reduction(data: Dict[str, Any], save_path: str):
     kmeans = KMeans(n_clusters=2, random_state=42)
     cluster_labels = kmeans.fit_predict(train_features)
     silhouette_avg = silhouette_score(train_features, cluster_labels)
-    
+
     plt.subplot(2, 3, 5)
     scatter = plt.scatter(train_pca[:, 0], train_pca[:, 1], c=cluster_labels, cmap='Set1', alpha=0.7)
     plt.title(f'K-means Clustering\nSilhouette: {silhouette_avg:.3f}')
     plt.xlabel(f'PC1 ({pca.explained_variance_ratio_[0]:.1%})')
     plt.ylabel(f'PC2 ({pca.explained_variance_ratio_[1]:.1%})')
     plt.colorbar(scatter, label='Cluster')
-    
+
     # Distance matrix
     plt.subplot(2, 3, 6)
     distances = euclidean_distances(train_features)
@@ -191,7 +196,7 @@ def plot_dimensionality_reduction(data: Dict[str, Any], save_path: str):
     plt.xlabel('Sample Index')
     plt.ylabel('Sample Index')
     plt.colorbar(label='Euclidean Distance')
-    
+
     plt.tight_layout()
     plt.savefig(save_path, dpi=300, bbox_inches='tight')
     plt.close()
@@ -202,6 +207,7 @@ def plot_dimensionality_reduction(data: Dict[str, Any], save_path: str):
         'cluster_labels': cluster_labels,
         'silhouette_score': silhouette_avg
     }
+
 
 def analyze_features(data: Dict[str, Any]) -> Dict[str, Any]:
     """Analyze feature quality and performance"""
@@ -239,6 +245,7 @@ def analyze_features(data: Dict[str, Any]) -> Dict[str, Any]:
         }
     }
 
+
 def visualize_features_pipeline(config: 'AutoencoderConfig', dataset_config: 'DatasetConfig', 
                               experiment_dir: str = None) -> Dict[str, Any]:
     """Complete visualization pipeline"""
@@ -256,7 +263,7 @@ def visualize_features_pipeline(config: 'AutoencoderConfig', dataset_config: 'Da
     
     # Analyze features
     analysis_results = analyze_features(data)
-    
+
     # Save visualization data
     visualization_data = {
         'train_features': data['train_features'],
@@ -266,9 +273,9 @@ def visualize_features_pipeline(config: 'AutoencoderConfig', dataset_config: 'Da
         **dim_reduction_results,
         **analysis_results
     }
-    
+
     np.save(paths['visualization_data'], visualization_data)
-    
+
     print(f"Visualization completed for dataset: {dataset_config.name}")
     print(f"Results saved to: {paths['experiment_dir']}")
     return visualization_data

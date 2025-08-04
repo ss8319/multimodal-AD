@@ -49,4 +49,13 @@ datasets:
   #     - VISCODE
   #     - MRI_acquired
   #     - research_group
-  #     - subject_age 
+  #     - subject_age
+  
+  proteomic_full:
+    name: proteomic_full
+    metadata_path: "D:\\ADNI\\AD_CN\\proteomics\\Biomarkers Consortium Plasma Proteomics MRM\\proteomic_w_labels.csv"
+    exclude_columns:
+      - RID
+      - VISCODE
+      - research_group
+      - subject_age 
