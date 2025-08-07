@@ -18,6 +18,18 @@ random_state: 42
 # File paths
 base_path: "D:\\ADNI\\AD_CN\\proteomics\\Biomarkers Consortium Plasma Proteomics MRM"
 
+# TabNet parameters
+tabnet_params:
+  num_features: 8
+  feature_dim: 64
+  output_dim: 2
+  num_decision_steps: 3
+  relaxation_factor: 1.5
+  sparsity_coefficient: 1.0e-5
+  batch_momentum: 0.98
+  virtual_batch_size: 128
+  mask_type: "sparsemax"
+
 # Dataset configurations
 datasets:
   mrm_small:

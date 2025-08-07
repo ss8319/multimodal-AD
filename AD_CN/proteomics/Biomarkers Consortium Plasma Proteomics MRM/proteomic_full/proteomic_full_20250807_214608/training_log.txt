@@ -1,0 +1,76 @@
+2025-08-07 21:46:08,540 - INFO - Starting experiment: proteomic_full
+2025-08-07 21:46:08,541 - INFO - Experiment directory: D:\ADNI\AD_CN\proteomics\Biomarkers Consortium Plasma Proteomics MRM\proteomic_full\proteomic_full_20250807_214608
+2025-08-07 21:46:08,551 - INFO - Loading and preparing data...
+2025-08-07 21:46:08,641 - INFO - Data loaded: 158 samples, 320 features
+2025-08-07 21:46:08,642 - INFO - Train set: 126 samples, Test set: 32 samples
+2025-08-07 21:46:08,654 - INFO - Model initialized: 320 -> 8 -> 320
+2025-08-07 21:46:08,654 - INFO - Starting training...
+2025-08-07 21:46:14,405 - INFO - Starting training with 200 epochs
+2025-08-07 21:46:14,406 - INFO - Learning rate: 0.001, Weight decay: 1e-05
+2025-08-07 21:46:14,406 - INFO - Patience: 20, Batch size: 16
+2025-08-07 21:46:14,488 - INFO - New best model saved at epoch 1
+2025-08-07 21:46:14,554 - INFO - New best model saved at epoch 2
+2025-08-07 21:46:14,617 - INFO - New best model saved at epoch 3
+2025-08-07 21:46:14,666 - INFO - New best model saved at epoch 4
+2025-08-07 21:46:14,717 - INFO - New best model saved at epoch 5
+2025-08-07 21:46:14,758 - INFO - New best model saved at epoch 6
+2025-08-07 21:46:14,804 - INFO - New best model saved at epoch 7
+2025-08-07 21:46:14,854 - INFO - New best model saved at epoch 8
+2025-08-07 21:46:14,898 - INFO - New best model saved at epoch 9
+2025-08-07 21:46:14,940 - INFO - New best model saved at epoch 10
+2025-08-07 21:46:14,990 - INFO - New best model saved at epoch 11
+2025-08-07 21:46:15,035 - INFO - New best model saved at epoch 12
+2025-08-07 21:46:15,086 - INFO - New best model saved at epoch 13
+2025-08-07 21:46:15,120 - INFO - New best model saved at epoch 14
+2025-08-07 21:46:15,167 - INFO - New best model saved at epoch 15
+2025-08-07 21:46:15,218 - INFO - New best model saved at epoch 16
+2025-08-07 21:46:15,251 - INFO - New best model saved at epoch 17
+2025-08-07 21:46:15,300 - INFO - New best model saved at epoch 18
+2025-08-07 21:46:15,334 - INFO - New best model saved at epoch 19
+2025-08-07 21:46:15,381 - INFO - New best model saved at epoch 20
+2025-08-07 21:46:15,381 - INFO - Epoch [20/200], Train Loss: 0.554808, Val Loss: 0.414402
+2025-08-07 21:46:15,421 - INFO - New best model saved at epoch 21
+2025-08-07 21:46:15,466 - INFO - New best model saved at epoch 22
+2025-08-07 21:46:15,511 - INFO - New best model saved at epoch 23
+2025-08-07 21:46:15,551 - INFO - New best model saved at epoch 24
+2025-08-07 21:46:15,608 - INFO - New best model saved at epoch 25
+2025-08-07 21:46:15,651 - INFO - New best model saved at epoch 26
+2025-08-07 21:46:15,684 - INFO - New best model saved at epoch 27
+2025-08-07 21:46:15,757 - INFO - New best model saved at epoch 28
+2025-08-07 21:46:15,867 - INFO - New best model saved at epoch 30
+2025-08-07 21:46:15,941 - INFO - New best model saved at epoch 31
+2025-08-07 21:46:16,000 - INFO - New best model saved at epoch 32
+2025-08-07 21:46:16,071 - INFO - New best model saved at epoch 33
+2025-08-07 21:46:16,140 - INFO - New best model saved at epoch 34
+2025-08-07 21:46:16,193 - INFO - New best model saved at epoch 35
+2025-08-07 21:46:16,244 - INFO - New best model saved at epoch 36
+2025-08-07 21:46:16,293 - INFO - New best model saved at epoch 37
+2025-08-07 21:46:16,405 - INFO - Epoch [40/200], Train Loss: 0.464219, Val Loss: 0.347212
+2025-08-07 21:46:16,491 - INFO - New best model saved at epoch 42
+2025-08-07 21:46:16,540 - INFO - New best model saved at epoch 43
+2025-08-07 21:46:16,588 - INFO - New best model saved at epoch 44
+2025-08-07 21:46:16,643 - INFO - New best model saved at epoch 45
+2025-08-07 21:46:16,751 - INFO - New best model saved at epoch 47
+2025-08-07 21:46:16,809 - INFO - New best model saved at epoch 48
+2025-08-07 21:46:16,868 - INFO - New best model saved at epoch 49
+2025-08-07 21:46:17,047 - INFO - New best model saved at epoch 51
+2025-08-07 21:46:17,553 - INFO - New best model saved at epoch 59
+2025-08-07 21:46:17,614 - INFO - Epoch [60/200], Train Loss: 0.444902, Val Loss: 0.328389
+2025-08-07 21:46:17,700 - INFO - New best model saved at epoch 61
+2025-08-07 21:46:17,940 - INFO - New best model saved at epoch 66
+2025-08-07 21:46:18,053 - INFO - New best model saved at epoch 67
+2025-08-07 21:46:18,337 - INFO - New best model saved at epoch 70
+2025-08-07 21:46:18,455 - INFO - New best model saved at epoch 71
+2025-08-07 21:46:18,672 - INFO - New best model saved at epoch 73
+2025-08-07 21:46:19,273 - INFO - Epoch [80/200], Train Loss: 0.439720, Val Loss: 0.326781
+2025-08-07 21:46:19,446 - INFO - New best model saved at epoch 82
+2025-08-07 21:46:19,540 - INFO - New best model saved at epoch 83
+2025-08-07 21:46:20,761 - INFO - Epoch [100/200], Train Loss: 0.434088, Val Loss: 0.319101
+2025-08-07 21:46:21,032 - INFO - Early stopping at epoch 103
+2025-08-07 21:46:21,032 - INFO - Training completed. Best validation loss: 0.318961
+2025-08-07 21:46:21,032 - INFO - Best model loaded for feature extraction
+2025-08-07 21:46:21,032 - INFO - Extracting features...
+2025-08-07 21:46:21,048 - INFO - Training features shape: (126, 8)
+2025-08-07 21:46:21,048 - INFO - Test features shape: (32, 8)
+2025-08-07 21:46:22,698 - INFO - Autoencoder experiment summary saved
+2025-08-07 21:46:22,698 - INFO - Training pipeline completed successfully!

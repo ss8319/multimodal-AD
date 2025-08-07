@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Main pipeline controller for protein autoencoder training and visualization.
+Main pipeline controller for protein autoencoder and TabNet training and visualization.
 Uses YAML configuration files for easy parameter management.
 """
 
@@ -11,20 +11,44 @@ from typing import Dict, Any
 from pathlib import Path
 
 # Import our modules
-from config import AutoencoderConfig, DatasetConfig, DATASET_CONFIGS
+from config import AutoencoderConfig, TabNetConfig, DatasetConfig, DATASET_CONFIGS
 from protein_model import train_autoencoder_pipeline
 from protein_feature_vis import visualize_features_pipeline
+from tabnet_model import train_tabnet_pipeline
 
 def load_config(config_path: str) -> Dict[str, Any]:
     """Load configuration from YAML file"""
     with open(config_path, 'r') as f:
         return yaml.safe_load(f)
 
-def create_config_from_yaml(config_dict: Dict[str, Any]) -> AutoencoderConfig:
+def create_config_from_yaml(config_dict: Dict[str, Any], model_type: str = 'autoencoder') -> AutoencoderConfig:
     """Create AutoencoderConfig from YAML dictionary"""
     return AutoencoderConfig(
         hidden_size=int(config_dict.get('hidden_size', 8)),
         dropout_rate=float(config_dict.get('dropout_rate', 0.1)),
+        num_epochs=int(config_dict.get('num_epochs', 200)),
+        learning_rate=float(config_dict.get('learning_rate', 0.001)),
+        patience=int(config_dict.get('patience', 20)),
+        batch_size=int(config_dict.get('batch_size', 16)),
+        weight_decay=float(config_dict.get('weight_decay', 1e-5)),
+        test_size=float(config_dict.get('test_size', 0.2)),
+        random_state=int(config_dict.get('random_state', 42)),
+        base_path=str(config_dict.get('base_path', r"D:\ADNI\AD_CN\proteomics\Biomarkers Consortium Plasma Proteomics MRM"))
+    )
+
+def create_tabnet_config_from_yaml(config_dict: Dict[str, Any]) -> TabNetConfig:
+    """Create TabNetConfig from YAML dictionary"""
+    tabnet_params = config_dict.get('tabnet_params', {})
+    return TabNetConfig(
+        num_features=int(tabnet_params.get('num_features', 8)),
+        feature_dim=int(tabnet_params.get('feature_dim', 64)),
+        output_dim=int(tabnet_params.get('output_dim', 2)),
+        num_decision_steps=int(tabnet_params.get('num_decision_steps', 3)),
+        relaxation_factor=float(tabnet_params.get('relaxation_factor', 1.5)),
+        sparsity_coefficient=float(tabnet_params.get('sparsity_coefficient', 1e-5)),
+        batch_momentum=float(tabnet_params.get('batch_momentum', 0.98)),
+        virtual_batch_size=int(tabnet_params.get('virtual_batch_size', 128)),
+        mask_type=str(tabnet_params.get('mask_type', 'sparsemax')),
         num_epochs=int(config_dict.get('num_epochs', 200)),
         learning_rate=float(config_dict.get('learning_rate', 0.001)),
         patience=int(config_dict.get('patience', 20)),
@@ -46,13 +70,15 @@ def create_dataset_config_from_yaml(dataset_dict: Dict[str, Any]) -> DatasetConf
 
 def main():
     """Main pipeline controller"""
-    parser = argparse.ArgumentParser(description='Protein Autoencoder Pipeline')
+    parser = argparse.ArgumentParser(description='Protein Autoencoder and TabNet Pipeline')
     parser.add_argument('--config', type=str, default='configs/default.yml',
                        help='Path to YAML configuration file')
     parser.add_argument('--dataset', type=str, required=True,
                        help='Dataset name to process')
+    parser.add_argument('--model-type', type=str, choices=['autoencoder', 'tabnet'], default='autoencoder',
+                       help='Model type to use (autoencoder or tabnet)')
     parser.add_argument('--train', action='store_true',
-                       help='Train autoencoder')
+                       help='Train model')
     parser.add_argument('--visualize', action='store_true',
                        help='Visualize features')
     parser.add_argument('--output-dir', type=str,
@@ -70,8 +96,11 @@ def main():
     
     config_dict = load_config(args.config)
     
-    # Create config objects
-    config = create_config_from_yaml(config_dict)
+    # Create config objects based on model type
+    if args.model_type == 'autoencoder':
+        config = create_config_from_yaml(config_dict)
+    else:  # tabnet
+        config = create_tabnet_config_from_yaml(config_dict)
     
     # Get dataset configuration
     if args.dataset in config_dict.get('datasets', {}):
@@ -87,6 +116,7 @@ def main():
         config.base_path = args.output_dir
     
     print(f"Processing dataset: {args.dataset}")
+    print(f"Model type: {args.model_type}")
     print(f"Metadata path: {dataset_config.metadata_path}")
     print(f"Output directory: {config.base_path}")
     if args.experiment_name:
@@ -97,8 +127,12 @@ def main():
     results = {}
     
     if args.train:
-        print("Training autoencoder...")
-        training_results = train_autoencoder_pipeline(config, dataset_config, args.experiment_name)
+        print(f"Training {args.model_type}...")
+        if args.model_type == 'autoencoder':
+            training_results = train_autoencoder_pipeline(config, dataset_config, args.experiment_name)
+        else:  # tabnet
+            training_results = train_tabnet_pipeline(config, dataset_config, args.experiment_name)
+        
         results['training'] = training_results
         print(f"Training completed! Results saved to: {training_results['experiment_dir']}")
     
@@ -123,6 +157,8 @@ def main():
             else:
                 raise ValueError(f"Dataset directory not found: {dataset_path}")
         
+        # For now, use the same visualization pipeline for both models
+        # TODO: Create TabNet-specific visualization
         visualization_results = visualize_features_pipeline(config, dataset_config, experiment_dir)
         results['visualization'] = visualization_results
         print("Visualization completed!")
@@ -142,6 +178,17 @@ def create_default_config(config_path: str):
         'test_size': 0.2,
         'random_state': 42,
         'base_path': r"D:\ADNI\AD_CN\proteomics\Biomarkers Consortium Plasma Proteomics MRM",
+        'tabnet_params': {
+            'num_features': 8,
+            'feature_dim': 64,
+            'output_dim': 2,
+            'num_decision_steps': 3,
+            'relaxation_factor': 1.5,
+            'sparsity_coefficient': 1e-5,
+            'batch_momentum': 0.98,
+            'virtual_batch_size': 128,
+            'mask_type': 'sparsemax'
+        },
         'datasets': {
             'mrm_small': {
                 'name': 'mrm_small',
@@ -165,11 +212,15 @@ def create_default_config(config_path: str):
     print(f"Created default configuration at: {config_path}")
 
 # Convenience functions for programmatic use
-def train_dataset(dataset_name: str, config_path: str = 'configs/default.yml', 
+def train_dataset(dataset_name: str, model_type: str = 'autoencoder', config_path: str = 'configs/default.yml', 
                  experiment_name: str = None) -> Dict[str, Any]:
-    """Train autoencoder for a specific dataset"""
+    """Train model for a specific dataset"""
     config_dict = load_config(config_path)
-    config = create_config_from_yaml(config_dict)
+    
+    if model_type == 'autoencoder':
+        config = create_config_from_yaml(config_dict)
+    else:  # tabnet
+        config = create_tabnet_config_from_yaml(config_dict)
     
     if dataset_name in config_dict.get('datasets', {}):
         dataset_dict = config_dict['datasets'][dataset_name]
@@ -177,7 +228,10 @@ def train_dataset(dataset_name: str, config_path: str = 'configs/default.yml',
     else:
         dataset_config = DATASET_CONFIGS[dataset_name]
     
-    return train_autoencoder_pipeline(config, dataset_config, experiment_name)
+    if model_type == 'autoencoder':
+        return train_autoencoder_pipeline(config, dataset_config, experiment_name)
+    else:  # tabnet
+        return train_tabnet_pipeline(config, dataset_config, experiment_name)
 
 def visualize_dataset(dataset_name: str, config_path: str = 'configs/default.yml',
                     experiment_dir: str = None) -> Dict[str, Any]:
@@ -193,21 +247,28 @@ def visualize_dataset(dataset_name: str, config_path: str = 'configs/default.yml
     
     return visualize_features_pipeline(config, dataset_config, experiment_dir)
 
-def process_all_datasets(config_path: str = 'configs/default.yml') -> Dict[str, Any]:
+def process_all_datasets(config_path: str = 'configs/default.yml', model_type: str = 'autoencoder') -> Dict[str, Any]:
     """Process all datasets defined in configuration"""
     config_dict = load_config(config_path)
-    config = create_config_from_yaml(config_dict)
+    
+    if model_type == 'autoencoder':
+        config = create_config_from_yaml(config_dict)
+    else:  # tabnet
+        config = create_tabnet_config_from_yaml(config_dict)
     
     results = {}
     datasets = config_dict.get('datasets', {})
     
     for dataset_name in datasets:
-        print(f"\nProcessing {dataset_name}...")
+        print(f"\nProcessing {dataset_name} with {model_type}...")
         dataset_dict = datasets[dataset_name]
         dataset_config = create_dataset_config_from_yaml(dataset_dict)
         
         # Train
-        training_results = train_autoencoder_pipeline(config, dataset_config)
+        if model_type == 'autoencoder':
+            training_results = train_autoencoder_pipeline(config, dataset_config)
+        else:  # tabnet
+            training_results = train_tabnet_pipeline(config, dataset_config)
         
         # Visualize
         visualization_results = visualize_features_pipeline(config, dataset_config, 

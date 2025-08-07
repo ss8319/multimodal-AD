@@ -1,11 +1,12 @@
-# Protein Autoencoder Pipeline
+# Protein Autoencoder and TabNet Pipeline
 
-A config-driven pipeline for training autoencoders on proteomic data and visualizing extracted features.
+A config-driven pipeline for training autoencoders and TabNet models on proteomic data and visualizing extracted features.
 
 ## Overview
 
 This pipeline provides:
-- **Autoencoder training** for feature extraction from proteomic data
+- **Autoencoder training** for unsupervised feature extraction from proteomic data
+- **TabNet pretraining** for unsupervised feature extraction using TabNet architecture
 - **Feature visualization** using PCA, t-SNE, UMAP, and clustering
 - **Feature interpretation** for biological insights
 - **Config-driven approach** using YAML files for easy parameter management
@@ -15,13 +16,15 @@ This pipeline provides:
 
 ## Script Architecture
 
-The pipeline consists of 6 interconnected Python scripts organized into two main workflows:
+The pipeline consists of 7 interconnected Python scripts organized into two main workflows:
 
 ### **Main Pipeline (Training & Visualization)**
 ```
 main.py (Central Controller)
 ├── config.py (Configuration Management)
-├── protein_model.py (Training Engine)
+├── base_model.py (Shared Functionality)
+├── protein_model.py (Autoencoder Training Engine)
+├── tabnet_model.py (TabNet Training Engine)
 └── protein_feature_vis.py (Visualization Engine)
 ```
 
@@ -37,29 +40,41 @@ interpret_features.py (Standalone Runner)
 
 1. **`main.py`** - Central Pipeline Controller
    - **Role:** Orchestrates the entire training and visualization workflow
-   - **Connections:** Imports and calls functions from `config.py`, `protein_model.py`, and `protein_feature_vis.py`
+   - **Connections:** Imports and calls functions from `config.py`, `base_model.py`, `protein_model.py`, `tabnet_model.py`, and `protein_feature_vis.py`
    - **Functions:** 
      - Loads YAML configuration files
-     - Calls `train_autoencoder_pipeline()` for training
+     - Calls `train_autoencoder_pipeline()` or `train_tabnet_pipeline()` for training
      - Calls `visualize_features_pipeline()` for visualization
      - Manages experiment directories and logging
 
 2. **`config.py`** - Configuration Management
    - **Role:** Defines data structures and configuration classes
-   - **Classes:** `AutoencoderConfig`, `DatasetConfig`, `DATASET_CONFIGS`
+   - **Classes:** `AutoencoderConfig`, `TabNetConfig`, `DatasetConfig`, `DATASET_CONFIGS`
    - **Connections:** Used by all other scripts for configuration management
    - **Functions:** `get_paths()` generates unique experiment directory structures
 
-3. **`protein_model.py`** - Training Engine
+3. **`base_model.py`** - Shared Functionality
+   - **Role:** Contains common functions used by both autoencoder and TabNet models
+   - **Functions:** `setup_logging()`, `save_config_snapshot()`, `load_and_prepare_data()`, `plot_training_curves()`, `create_experiment_summary()`
+   - **Purpose:** Eliminates code duplication between models
+
+4. **`protein_model.py`** - Autoencoder Training Engine
    - **Role:** Defines autoencoder architecture and handles training
    - **Classes:** `ProteinAutoencoder` (PyTorch neural network)
-   - **Connections:** Called by `main.py` for training workflow
+   - **Connections:** Called by `main.py` for autoencoder training workflow
    - **Functions:**
-     - `train_autoencoder_pipeline()` - Complete training workflow
-     - `load_and_prepare_data()` - Data preprocessing
+     - `train_autoencoder_pipeline()` - Complete autoencoder training workflow
      - `extract_features()` - Feature extraction from trained model
 
-4. **`protein_feature_vis.py`** - Visualization Engine
+5. **`tabnet_model.py`** - TabNet Training Engine
+   - **Role:** Defines TabNet pretraining and handles unsupervised feature extraction
+   - **Classes:** Uses `TabNetPretrainer` from pytorch-tabnet
+   - **Connections:** Called by `main.py` for TabNet training workflow
+   - **Functions:**
+     - `train_tabnet_pipeline()` - Complete TabNet pretraining workflow
+     - `extract_tabnet_features()` - Feature extraction from trained TabNet
+
+6. **`protein_feature_vis.py`** - Visualization Engine
    - **Role:** Creates comprehensive feature analysis visualizations
    - **Connections:** Called by `main.py` for visualization workflow
    - **Functions:**
@@ -69,12 +84,12 @@ interpret_features.py (Standalone Runner)
 
 #### **Interpretability Scripts (Separate Workflow)**
 
-5. **`interpret_features.py`** - Standalone Interpretability Runner
+7. **`interpret_features.py`** - Standalone Interpretability Runner
    - **Role:** Independent script for feature interpretation (separate from main pipeline)
    - **Connections:** Imports functions from `protein_feature_interpretation.py`
    - **Functions:** Automatically finds most recent experiment and runs interpretation
 
-6. **`protein_feature_interpretation.py`** - Interpretability Engine
+8. **`protein_feature_interpretation.py`** - Interpretability Engine
    - **Role:** Provides biological interpretation of learned features
    - **Connections:** Called by `interpret_features.py` (separate workflow)
    - **Functions:**
@@ -84,7 +99,7 @@ interpret_features.py (Standalone Runner)
 
 ### **Workflow Separation**
 
-- **Main Pipeline:** `main.py` → `protein_model.py` → `protein_feature_vis.py`
+- **Main Pipeline:** `main.py` → `protein_model.py`/`tabnet_model.py` → `protein_feature_vis.py`
 - **Interpretability Pipeline:** `interpret_features.py` → `protein_feature_interpretation.py`
 - **No direct connection** between main pipeline and interpretability scripts
 - **Shared resources:** Both workflows use the same experiment directories and saved models
@@ -94,12 +109,16 @@ interpret_features.py (Standalone Runner)
 ```
 ├── main.py                 # Main pipeline controller
 ├── config.py              # Configuration classes
+├── base_model.py          # Shared functionality
 ├── protein_model.py       # Autoencoder model and training
+├── tabnet_model.py        # TabNet model and training
 ├── protein_feature_vis.py # Feature visualization
 ├── interpret_features.py   # Standalone interpretability runner
 ├── protein_feature_interpretation.py # Feature interpretation engine
 ├── configs/
-│   └── default.yml        # Default configuration
+│   ├── default.yml        # Default configuration
+│   ├── autoencoder_experiment.yml # Autoencoder-specific config
+│   └── tabnet_experiment.yml # TabNet-specific config
 └── README.md              # This file
 ```
 
@@ -107,7 +126,7 @@ interpret_features.py (Standalone Runner)
 
 1. **Install dependencies:**
 ```bash
-poetry add pyyaml
+poetry add pyyaml pytorch-tabnet
 ```
 
 2. **Verify installation:**
@@ -124,12 +143,15 @@ The pipeline operates in two distinct stages:
 #### **Stage 1: Training & Visualization (Main Pipeline)**
 ```bash
 # Train autoencoder and visualize features
-python main.py --dataset proteomic_full --train --visualize --experiment-name "my_experiment"
+python main.py --dataset proteomic_full --model-type autoencoder --train --visualize
+
+# Train TabNet and visualize features
+python main.py --dataset proteomic_full --model-type tabnet --train --visualize
 ```
 
 **What happens:**
 1. `main.py` loads configuration from YAML
-2. `protein_model.py` trains autoencoder and extracts 8-dimensional features
+2. `protein_model.py` or `tabnet_model.py` trains model and extracts 8-dimensional features
 3. `protein_feature_vis.py` creates comprehensive visualizations
 4. Results saved to unique experiment directory
 
@@ -157,32 +179,37 @@ python interpret_features.py
 
 **Train autoencoder (auto-generated experiment name):**
 ```bash
-python main.py --dataset mrm_small --train
+python main.py --dataset proteomic_full --model-type autoencoder --train
+```
+
+**Train TabNet (auto-generated experiment name):**
+```bash
+python main.py --dataset proteomic_full --model-type tabnet --train
 ```
 
 **Train with custom experiment name:**
 ```bash
-python main.py --dataset mrm_small --train --experiment-name "my_experiment_001"
+python main.py --dataset proteomic_full --model-type autoencoder --train --experiment-name "my_experiment_001"
 ```
 
 **Visualize features (uses most recent experiment):**
 ```bash
-python main.py --dataset mrm_small --visualize
+python main.py --dataset proteomic_full --model-type autoencoder --visualize
 ```
 
 **Train and visualize:**
 ```bash
-python main.py --dataset mrm_small --train --visualize
+python main.py --dataset proteomic_full --model-type autoencoder --train --visualize
 ```
 
 **Use custom configuration:**
 ```bash
-python main.py --config configs/my_config.yml --dataset mrm_small --train
+python main.py --config configs/autoencoder_experiment.yml --dataset proteomic_full --model-type autoencoder --train
 ```
 
 **Override output directory:**
 ```bash
-python main.py --dataset mrm_small --train --output-dir "D:/my_output"
+python main.py --dataset proteomic_full --model-type autoencoder --train --output-dir "D:/my_output"
 ```
 
 ### 2. Programmatic Usage
@@ -190,17 +217,20 @@ python main.py --dataset mrm_small --train --output-dir "D:/my_output"
 ```python
 from main import train_dataset, visualize_dataset, process_all_datasets
 
-# Train a specific dataset
-results = train_dataset('mrm_small', 'configs/default.yml')
+# Train a specific dataset with autoencoder
+results = train_dataset('proteomic_full', 'autoencoder', 'configs/default.yml')
+
+# Train a specific dataset with TabNet
+results = train_dataset('proteomic_full', 'tabnet', 'configs/default.yml')
 
 # Train with custom experiment name
-results = train_dataset('mrm_small', 'configs/default.yml', 'my_experiment')
+results = train_dataset('proteomic_full', 'autoencoder', 'configs/default.yml', 'my_experiment')
 
 # Visualize features
-viz_results = visualize_dataset('mrm_small', 'configs/default.yml')
+viz_results = visualize_dataset('proteomic_full', 'configs/default.yml')
 
 # Process all datasets
-all_results = process_all_datasets('configs/default.yml')
+all_results = process_all_datasets('configs/default.yml', 'autoencoder')
 ```
 
 ### 3. Configuration Files
@@ -218,15 +248,26 @@ learning_rate: 0.001
 patience: 20
 batch_size: 16
 
+# TabNet parameters
+tabnet_params:
+  num_features: 8
+  feature_dim: 64
+  output_dim: 2
+  num_decision_steps: 3
+  relaxation_factor: 1.5
+  sparsity_coefficient: 1.0e-5
+  batch_momentum: 0.98
+  virtual_batch_size: 128
+  mask_type: "sparsemax"
+
 # Dataset configurations
 datasets:
-  mrm_small:
-    name: mrm_small
-    metadata_path: "D:\\ADNI\\AD_CN\\proteomics\\Biomarkers Consortium Plasma Proteomics MRM\\metadata.csv"
+  proteomic_full:
+    name: proteomic_full
+    metadata_path: "D:\\ADNI\\AD_CN\\proteomics\\Biomarkers Consortium Plasma Proteomics MRM\\proteomic_w_labels.csv"
     exclude_columns:
       - RID
       - VISCODE
-      - MRI_acquired
       - research_group
       - subject_age
 ```
@@ -244,6 +285,17 @@ datasets:
 - `batch_size`: Batch size (default: 16)
 - `weight_decay`: L2 regularization (default: 1e-5)
 
+### TabNet Parameters
+- `num_features`: Number of features to select (default: 8)
+- `feature_dim`: Dimension of features (default: 64)
+- `output_dim`: Number of classes (default: 2)
+- `num_decision_steps`: Number of decision steps (default: 3)
+- `relaxation_factor`: Relaxation factor (default: 1.5)
+- `sparsity_coefficient`: Sparsity coefficient (default: 1e-5)
+- `batch_momentum`: Batch momentum (default: 0.98)
+- `virtual_batch_size`: Virtual batch size (default: 128)
+- `mask_type`: Mask type ("sparsemax" or "entmax") (default: "sparsemax")
+
 ### Data Parameters
 - `test_size`: Test set fraction (default: 0.2)
 - `random_state`: Random seed (default: 42)
@@ -260,8 +312,8 @@ datasets:
 Each training run creates a unique experiment directory with timestamp:
 
 ```
-dataset_name/
-└── dataset_name_YYYYMMDD_HHMMSS/
+proteomic_full/
+└── proteomic_full_YYYYMMDD_HHMMSS/
     ├── train_features_autoencoder.npy    # Extracted training features
     ├── test_features_autoencoder.npy     # Extracted test features
     ├── best_autoencoder.pth              # Best trained model
@@ -282,31 +334,31 @@ dataset_name/
 - **Experiment Summary**: Comprehensive summary of parameters and results
 - **Console Output**: Real-time progress updates during training
 
-### Example Experiment Directory
+## Model Comparison
 
-```
-mrm_small/
-└── mrm_small_20241201_143022/
-    ├── training_log.txt
-    ├── config_snapshot.yml
-    ├── experiment_summary.txt
-    ├── best_autoencoder.pth
-    ├── training_curves.png
-    ├── train_features_autoencoder.npy
-    ├── test_features_autoencoder.npy
-    ├── scaler.pkl
-    ├── feature_quality_analysis.png
-    ├── dimensionality_reduction_analysis.png
-    └── visualization_data.npy
-```
+### Autoencoder vs TabNet
+
+| Aspect | Autoencoder | TabNet |
+|--------|-------------|--------|
+| **Architecture** | Neural network with bottleneck | Attention-based tabular learning |
+| **Learning** | Unsupervised reconstruction | Unsupervised pretraining |
+| **Feature Extraction** | Bottleneck layer (8 dims) | Encoder + dimensionality handling (8 dims) |
+| **Interpretability** | Feature-to-protein mapping | Built-in attention mechanisms |
+| **Use Case** | Standard autoencoder approach | Tabular data with attention |
+
+Both models:
+- ✅ Extract **8-dimensional features**
+- ✅ Use **unsupervised learning**
+- ✅ Work with the same **visualization pipeline**
+- ✅ Support **config-driven experimentation**
 
 ## Output Files
 
 ### Training Outputs
-- `best_autoencoder.pth`: Best trained model weights
+- `best_autoencoder.pth` / `best_tabnet.pth`: Best trained model weights
 - `training_curves.png`: Training and validation loss curves
-- `train_features_autoencoder.npy`: Extracted training features
-- `test_features_autoencoder.npy`: Extracted test features
+- `train_features_autoencoder.npy` / `train_features_tabnet.npy`: Extracted training features
+- `test_features_autoencoder.npy` / `test_features_tabnet.npy`: Extracted test features
 - `scaler.pkl`: Data scaler for preprocessing
 
 ### Logging Outputs
@@ -330,14 +382,13 @@ datasets:
     exclude_columns:
       - RID
       - VISCODE
-      - MRI_acquired
       - research_group
       - subject_age
 ```
 
 2. **Run pipeline:**
 ```bash
-python main.py --dataset my_new_dataset --train --visualize
+python main.py --dataset my_new_dataset --model-type autoencoder --train --visualize
 ```
 
 ## Visualization Features
@@ -394,26 +445,35 @@ cp configs/default.yml configs/my_experiment.yml
 # Edit my_experiment.yml with your parameters
 
 # 2. Train autoencoder with custom experiment name
-python main.py --config configs/my_experiment.yml --dataset mrm_small --train --experiment-name "baseline_model"
+python main.py --config configs/my_experiment.yml --dataset proteomic_full --model-type autoencoder --train --experiment-name "baseline_autoencoder"
 
-# 3. Check the experiment directory
-ls "D:\ADNI\AD_CN\proteomics\Biomarkers Consortium Plasma Proteomics MRM\mrm_small\mrm_small_20241201_143022\"
+# 3. Train TabNet with custom experiment name
+python main.py --config configs/my_experiment.yml --dataset proteomic_full --model-type tabnet --train --experiment-name "baseline_tabnet"
 
-# 4. View training log
-cat "D:\ADNI\AD_CN\proteomics\Biomarkers Consortium Plasma Proteomics MRM\mrm_small\mrm_small_20241201_143022\training_log.txt"
+# 4. Check the experiment directories
+ls "D:\ADNI\AD_CN\proteomics\Biomarkers Consortium Plasma Proteomics MRM\proteomic_full\"
 
-# 5. View experiment summary
-cat "D:\ADNI\AD_CN\proteomics\Biomarkers Consortium Plasma Proteomics MRM\mrm_small\mrm_small_20241201_143022\experiment_summary.txt"
+# 5. View training log
+cat "D:\ADNI\AD_CN\proteomics\Biomarkers Consortium Plasma Proteomics MRM\proteomic_full\proteomic_full_YYYYMMDD_HHMMSS\training_log.txt"
 
-# 6. Visualize results
-python main.py --config configs/my_experiment.yml --dataset mrm_small --visualize
+# 6. View experiment summary
+cat "D:\ADNI\AD_CN\proteomics\Biomarkers Consortium Plasma Proteomics MRM\proteomic_full\proteomic_full_YYYYMMDD_HHMMSS\experiment_summary.txt"
+
+# 7. Visualize results
+python main.py --config configs/my_experiment.yml --dataset proteomic_full --model-type autoencoder --visualize
+
+# 8. Interpret features (separate workflow)
+python interpret_features.py
+
+# 9. View interpretability results
+cat "D:\ADNI\AD_CN\proteomics\Biomarkers Consortium Plasma Proteomics MRM\proteomic_full\proteomic_full_YYYYMMDD_HHMMSS\feature_interpretation_report.txt"
 ```
 
 ## Experiment Tracking
 
 ### Automatic Experiment Naming
 - Format: `{dataset_name}_{YYYYMMDD}_{HHMMSS}`
-- Example: `mrm_small_20241201_143022`
+- Example: `proteomic_full_20241201_143022`
 
 ### Custom Experiment Names
 - Use `--experiment-name` flag
@@ -446,3 +506,8 @@ python main.py --config configs/my_experiment.yml --dataset mrm_small --visualiz
 - Check that the base path exists and is writable
 - Ensure sufficient disk space for experiment files
 - Verify that the dataset directory structure is correct
+
+**TabNet-specific issues:**
+- Ensure `pytorch-tabnet` is properly installed
+- Check that the model parameters are compatible with your data
+- Verify that the pretraining ratio is appropriate for your dataset
