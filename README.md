@@ -7,10 +7,87 @@ A config-driven pipeline for training autoencoders on proteomic data and visuali
 This pipeline provides:
 - **Autoencoder training** for feature extraction from proteomic data
 - **Feature visualization** using PCA, t-SNE, UMAP, and clustering
+- **Feature interpretation** for biological insights
 - **Config-driven approach** using YAML files for easy parameter management
 - **Multiple dataset support** for different proteomic datasets
 - **Comprehensive logging** with unique experiment directories
 - **Experiment tracking** with timestamps and detailed summaries
+
+## Script Architecture
+
+The pipeline consists of 6 interconnected Python scripts organized into two main workflows:
+
+### **Main Pipeline (Training & Visualization)**
+```
+main.py (Central Controller)
+├── config.py (Configuration Management)
+├── protein_model.py (Training Engine)
+└── protein_feature_vis.py (Visualization Engine)
+```
+
+### **Interpretability Pipeline (Separate Workflow)**
+```
+interpret_features.py (Standalone Runner)
+└── protein_feature_interpretation.py (Interpretability Engine)
+```
+
+### **Script Roles & Connections**
+
+#### **Core Pipeline Scripts**
+
+1. **`main.py`** - Central Pipeline Controller
+   - **Role:** Orchestrates the entire training and visualization workflow
+   - **Connections:** Imports and calls functions from `config.py`, `protein_model.py`, and `protein_feature_vis.py`
+   - **Functions:** 
+     - Loads YAML configuration files
+     - Calls `train_autoencoder_pipeline()` for training
+     - Calls `visualize_features_pipeline()` for visualization
+     - Manages experiment directories and logging
+
+2. **`config.py`** - Configuration Management
+   - **Role:** Defines data structures and configuration classes
+   - **Classes:** `AutoencoderConfig`, `DatasetConfig`, `DATASET_CONFIGS`
+   - **Connections:** Used by all other scripts for configuration management
+   - **Functions:** `get_paths()` generates unique experiment directory structures
+
+3. **`protein_model.py`** - Training Engine
+   - **Role:** Defines autoencoder architecture and handles training
+   - **Classes:** `ProteinAutoencoder` (PyTorch neural network)
+   - **Connections:** Called by `main.py` for training workflow
+   - **Functions:**
+     - `train_autoencoder_pipeline()` - Complete training workflow
+     - `load_and_prepare_data()` - Data preprocessing
+     - `extract_features()` - Feature extraction from trained model
+
+4. **`protein_feature_vis.py`** - Visualization Engine
+   - **Role:** Creates comprehensive feature analysis visualizations
+   - **Connections:** Called by `main.py` for visualization workflow
+   - **Functions:**
+     - `plot_feature_quality_analysis()` - Feature distribution, variance, correlation
+     - `plot_dimensionality_reduction()` - PCA, t-SNE, UMAP, clustering
+     - `analyze_features()` - Performance metrics and statistics
+
+#### **Interpretability Scripts (Separate Workflow)**
+
+5. **`interpret_features.py`** - Standalone Interpretability Runner
+   - **Role:** Independent script for feature interpretation (separate from main pipeline)
+   - **Connections:** Imports functions from `protein_feature_interpretation.py`
+   - **Functions:** Automatically finds most recent experiment and runs interpretation
+
+6. **`protein_feature_interpretation.py`** - Interpretability Engine
+   - **Role:** Provides biological interpretation of learned features
+   - **Connections:** Called by `interpret_features.py` (separate workflow)
+   - **Functions:**
+     - `analyze_feature_contributions()` - Maps features back to original proteins
+     - `analyze_feature_correlations_with_diagnosis()` - Correlates features with AD diagnosis
+     - `create_feature_summary_report()` - Generates detailed interpretation reports
+
+### **Workflow Separation**
+
+- **Main Pipeline:** `main.py` → `protein_model.py` → `protein_feature_vis.py`
+- **Interpretability Pipeline:** `interpret_features.py` → `protein_feature_interpretation.py`
+- **No direct connection** between main pipeline and interpretability scripts
+- **Shared resources:** Both workflows use the same experiment directories and saved models
 
 ## File Structure
 
@@ -19,6 +96,8 @@ This pipeline provides:
 ├── config.py              # Configuration classes
 ├── protein_model.py       # Autoencoder model and training
 ├── protein_feature_vis.py # Feature visualization
+├── interpret_features.py   # Standalone interpretability runner
+├── protein_feature_interpretation.py # Feature interpretation engine
 ├── configs/
 │   └── default.yml        # Default configuration
 └── README.md              # This file
@@ -35,6 +114,42 @@ poetry add pyyaml
 ```bash
 python main.py --help
 ```
+
+## Complete Workflow
+
+### **Two-Stage Pipeline**
+
+The pipeline operates in two distinct stages:
+
+#### **Stage 1: Training & Visualization (Main Pipeline)**
+```bash
+# Train autoencoder and visualize features
+python main.py --dataset proteomic_full --train --visualize --experiment-name "my_experiment"
+```
+
+**What happens:**
+1. `main.py` loads configuration from YAML
+2. `protein_model.py` trains autoencoder and extracts 8-dimensional features
+3. `protein_feature_vis.py` creates comprehensive visualizations
+4. Results saved to unique experiment directory
+
+#### **Stage 2: Feature Interpretation (Separate Workflow)**
+```bash
+# Interpret the learned features (run after training)
+python interpret_features.py
+```
+
+**What happens:**
+1. `interpret_features.py` automatically finds your most recent experiment
+2. `protein_feature_interpretation.py` analyzes feature-to-protein mappings
+3. Creates biological interpretation reports and correlation analyses
+
+### **Key Workflow Separation**
+
+- **Main Pipeline:** Training → Visualization (connected workflow)
+- **Interpretability Pipeline:** Feature interpretation (separate, independent workflow)
+- **Shared Resources:** Both use the same experiment directories and saved models
+- **No Direct Connection:** Interpretability is a separate analysis step
 
 ## Usage
 
@@ -246,6 +361,30 @@ The pipeline provides comprehensive feature analysis:
    - KNN classification accuracy
    - Silhouette score for clustering
    - Feature statistics
+
+## Interpretability Features
+
+The interpretability pipeline provides biological insights:
+
+1. **Feature-to-Protein Mapping:**
+   - Maps each of the 8 learned features back to original proteins
+   - Identifies top positive and negative protein contributors
+   - Calculates effective weights through neural network layers
+
+2. **Diagnosis Correlation Analysis:**
+   - Correlates each feature with AD/CN diagnosis
+   - Ranks features by importance for disease classification
+   - Creates correlation plots and importance rankings
+
+3. **Biological Interpretation:**
+   - Generates detailed text reports for each feature
+   - Identifies protein patterns and biological pathways
+   - Provides clinical relevance insights
+
+4. **Output Files:**
+   - `feature_interpretation.png`: Visual breakdown of each feature
+   - `feature_interpretation_report.txt`: Detailed text report
+   - `feature_diagnosis_correlations.png`: Feature vs AD diagnosis correlations
 
 ## Example Workflow
 
