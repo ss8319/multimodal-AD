@@ -3,6 +3,12 @@ ADNI/
 morphometry_results/
 Papers/
 MRI/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
 
 # Ignore all PDF, CSV, and ZIP files anywhere in the repo
 *.pdf
