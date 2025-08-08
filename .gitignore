@@ -4,6 +4,8 @@ morphometry_results/
 Papers/
 MRI/
 __pycache__/
+/colab/data
+
 *.pyc
 *.pyo
 *.pyd
