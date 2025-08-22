@@ -34,7 +34,7 @@ if hasattr(fold_clf, 'predict_proba'):
 Replace the results storage section with:
 
 ```python
-# Store results (CV only uses validation sets)
+# Sttore results (CV only uses validation sets)
 results.append({
     'classifier': clf_name,
     'cv_auc_mean': cv_mean,      # Performance on validation sets
