@@ -3,6 +3,8 @@ from sklearn.model_selection import train_test_split, StratifiedKFold
 import numpy as np
 import os
 from pathlib import Path
+import pydicom
+from collections import defaultdict
 
 AD_CN_baseline_add_training_data = r"D:\ADNI\AD_CN\proteomics\Biomarkers Consortium Plasma Proteomics MRM\MRI\Baseline_AD_CN_8_21_2025.csv"
 train_df= pd.read_csv(AD_CN_baseline_add_training_data)
@@ -234,3 +236,232 @@ else:
     print(f"\n❌ ADNI folder not found - DICOM paths not added")
 
 print(f"\n📁 All files saved in: {output_folder}")
+
+def analyze_dicom_planes(dicom_folder_path, adni_base_path, max_files_per_subject=None):
+    """
+    Analyze DICOM files to determine imaging plane orientation
+    Returns: dict with plane information
+    """
+    if not dicom_folder_path:
+        return None
+    
+    full_path = Path(adni_base_path) / dicom_folder_path
+    if not full_path.exists():
+        return None
+    
+    plane_info = {
+        'orientation': 'Unknown',
+        'image_orientation': None,
+        'slice_thickness': None,
+        'pixel_spacing': None,
+        'matrix_size': None,
+        'num_slices': 0
+    }
+    
+    try:
+        # Find ALL DICOM files recursively
+        dcm_files = []
+        for root, dirs, files in os.walk(full_path):
+            for file in files:
+                if file.lower().endswith('.dcm'):
+                    dcm_files.append(os.path.join(root, file))
+                    # Remove artificial limit to get all slices
+                    if max_files_per_subject and len(dcm_files) >= max_files_per_subject:
+                        break
+            if max_files_per_subject and len(dcm_files) >= max_files_per_subject:
+                break
+        
+        if not dcm_files:
+            return plane_info
+        
+        plane_info['num_slices'] = len(dcm_files)
+        
+        # Read first DICOM file for metadata
+        ds = pydicom.dcmread(dcm_files[0])
+        
+        # Get Image Orientation Patient
+        if hasattr(ds, 'ImageOrientationPatient'):
+            iop = ds.ImageOrientationPatient
+            plane_info['image_orientation'] = [float(x) for x in iop]
+            
+            # Determine plane based on Image Orientation Patient
+            # Convert to numpy array for easier calculation
+            iop_array = np.array(iop).reshape(2, 3)
+            row_cosine = iop_array[0]  # First 3 values
+            col_cosine = iop_array[1]  # Last 3 values
+            
+            # Calculate slice normal (cross product)
+            slice_normal = np.cross(row_cosine, col_cosine)
+            slice_normal = slice_normal / np.linalg.norm(slice_normal)
+            
+            # Determine primary orientation based on largest component
+            abs_normal = np.abs(slice_normal)
+            max_component = np.argmax(abs_normal)
+            
+            if max_component == 0:  # X-axis (Sagittal)
+                plane_info['orientation'] = 'Sagittal'
+            elif max_component == 1:  # Y-axis (Coronal)
+                plane_info['orientation'] = 'Coronal'
+            elif max_component == 2:  # Z-axis (Axial)
+                plane_info['orientation'] = 'Axial'
+        
+        # Get slice thickness
+        if hasattr(ds, 'SliceThickness'):
+            plane_info['slice_thickness'] = float(ds.SliceThickness)
+        
+        # Get pixel spacing
+        if hasattr(ds, 'PixelSpacing'):
+            plane_info['pixel_spacing'] = [float(x) for x in ds.PixelSpacing]
+        
+        # Get matrix size
+        if hasattr(ds, 'Rows') and hasattr(ds, 'Columns'):
+            plane_info['matrix_size'] = [int(ds.Rows), int(ds.Columns)]
+            
+    except Exception as e:
+        print(f"   ⚠️ Error reading DICOM for {dicom_folder_path}: {str(e)}")
+        
+    return plane_info
+
+def check_imaging_planes_in_splits(train_df, test_df, adni_base_path):
+    """
+    Check imaging planes for all subjects in train/test splits
+    """
+    print(f"\n🔍 Analyzing imaging planes in train/test splits...")
+    
+    # Analyze training set
+    print(f"\n📊 TRAINING SET ANALYSIS:")
+    train_planes = defaultdict(int)
+    train_orientations = []
+    train_failed = 0
+    
+    for idx, row in train_df.iterrows():
+        if pd.notna(row['dicom_folder_path']):
+            plane_info = analyze_dicom_planes(row['dicom_folder_path'], adni_base_path)
+            if plane_info:
+                orientation = plane_info['orientation']
+                train_planes[orientation] += 1
+                train_orientations.append({
+                    'Subject': row['Subject'],
+                    'Group': row['Group'],
+                    'Description': row['Description'],
+                    'Orientation': orientation,
+                    'SliceThickness': plane_info['slice_thickness'],
+                    'MatrixSize': plane_info['matrix_size'],
+                    'NumSlices': plane_info['num_slices']
+                })
+            else:
+                train_failed += 1
+        else:
+            train_failed += 1
+    
+    # Analyze test set
+    print(f"\n📊 TEST SET ANALYSIS:")
+    test_planes = defaultdict(int)
+    test_orientations = []
+    test_failed = 0
+    
+    for idx, row in test_df.iterrows():
+        if pd.notna(row['dicom_folder_path']):
+            plane_info = analyze_dicom_planes(row['dicom_folder_path'], adni_base_path)
+            if plane_info:
+                orientation = plane_info['orientation']
+                test_planes[orientation] += 1
+                test_orientations.append({
+                    'Subject': row['Subject'],
+                    'Group': row['Group'],
+                    'Description': row['Description'],
+                    'Orientation': orientation,
+                    'SliceThickness': plane_info['slice_thickness'],
+                    'MatrixSize': plane_info['matrix_size'],
+                    'NumSlices': plane_info['num_slices']
+                })
+            else:
+                test_failed += 1
+        else:
+            test_failed += 1
+    
+    # Print results
+    print(f"\n✅ TRAINING SET PLANE DISTRIBUTION:")
+    for plane, count in train_planes.items():
+        percentage = (count / len(train_df)) * 100
+        print(f"   • {plane}: {count} subjects ({percentage:.1f}%)")
+    if train_failed > 0:
+        print(f"   • Failed to analyze: {train_failed} subjects")
+    
+    print(f"\n✅ TEST SET PLANE DISTRIBUTION:")
+    for plane, count in test_planes.items():
+        percentage = (count / len(test_df)) * 100
+        print(f"   • {plane}: {count} subjects ({percentage:.1f}%)")
+    if test_failed > 0:
+        print(f"   • Failed to analyze: {test_failed} subjects")
+    
+    # Check for consistency
+    print(f"\n🔄 PLANE CONSISTENCY CHECK:")
+    all_train_planes = set(train_planes.keys())
+    all_test_planes = set(test_planes.keys())
+    common_planes = all_train_planes.intersection(all_test_planes)
+    
+    if common_planes:
+        print(f"   ✅ Common planes in both sets: {', '.join(common_planes)}")
+    else:
+        print(f"   ⚠️ No common planes between train and test sets!")
+    
+    if all_train_planes - all_test_planes:
+        print(f"   📋 Planes only in training: {', '.join(all_train_planes - all_test_planes)}")
+    
+    if all_test_planes - all_train_planes:
+        print(f"   📋 Planes only in test: {', '.join(all_test_planes - all_train_planes)}")
+    
+    # Show detailed examples
+    print(f"\n📋 SAMPLE TRAINING SET DETAILS:")
+    train_df_detailed = pd.DataFrame(train_orientations)
+    if len(train_df_detailed) > 0:
+        for orientation in train_df_detailed['Orientation'].unique():
+            if orientation != 'Unknown':
+                samples = train_df_detailed[train_df_detailed['Orientation'] == orientation].head(2)
+                print(f"\n   {orientation} samples:")
+                for _, sample in samples.iterrows():
+                    print(f"      • {sample['Subject']} ({sample['Group']}): {sample['NumSlices']} slices, "
+                          f"Matrix: {sample['MatrixSize']}, Thickness: {sample['SliceThickness']}mm")
+    
+    print(f"\n📋 SAMPLE TEST SET DETAILS:")
+    test_df_detailed = pd.DataFrame(test_orientations)
+    if len(test_df_detailed) > 0:
+        for orientation in test_df_detailed['Orientation'].unique():
+            if orientation != 'Unknown':
+                samples = test_df_detailed[test_df_detailed['Orientation'] == orientation].head(2)
+                print(f"\n   {orientation} samples:")
+                for _, sample in samples.iterrows():
+                    print(f"      • {sample['Subject']} ({sample['Group']}): {sample['NumSlices']} slices, "
+                          f"Matrix: {sample['MatrixSize']}, Thickness: {sample['SliceThickness']}mm")
+    
+    # Save detailed analysis
+    output_folder = r"D:\ADNI\AD_CN\proteomics\Biomarkers Consortium Plasma Proteomics MRM\MRI\splits"
+    if len(train_orientations) > 0:
+        train_analysis_df = pd.DataFrame(train_orientations)
+        train_analysis_df.to_csv(f"{output_folder}/train_plane_analysis.csv", index=False)
+        print(f"\n💾 Training plane analysis saved to: {output_folder}/train_plane_analysis.csv")
+    
+    if len(test_orientations) > 0:
+        test_analysis_df = pd.DataFrame(test_orientations)
+        test_analysis_df.to_csv(f"{output_folder}/test_plane_analysis.csv", index=False)
+        print(f"💾 Test plane analysis saved to: {output_folder}/test_plane_analysis.csv")
+    
+    return train_orientations, test_orientations
+
+# Execute plane analysis if splits exist
+splits_folder = r"D:\ADNI\AD_CN\proteomics\Biomarkers Consortium Plasma Proteomics MRM\MRI\splits"
+if os.path.exists(f"{splits_folder}/train_split.csv") and os.path.exists(f"{splits_folder}/test_split.csv"):
+    print(f"\n🔍 Loading existing splits for plane analysis...")
+    existing_train_df = pd.read_csv(f"{splits_folder}/train_split.csv")
+    existing_test_df = pd.read_csv(f"{splits_folder}/test_split.csv")
+    
+    adni_base_path = r"D:\ADNI\AD_CN\proteomics\Biomarkers Consortium Plasma Proteomics MRM\MRI\ADNI"
+    if os.path.exists(adni_base_path):
+        train_orientations, test_orientations = check_imaging_planes_in_splits(
+            existing_train_df, existing_test_df, adni_base_path
+        )
+    else:
+        print(f"❌ ADNI folder not found for plane analysis")
+else:
+    print(f"❌ Split files not found for plane analysis")

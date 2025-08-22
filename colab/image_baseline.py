@@ -41,60 +41,107 @@ class MRIDataset(Dataset):
         return len(self.df)
     
     def load_dicom_volume(self, dicom_folder_path):
-        """Load DICOM files from folder and create 3D volume"""
+        """Load DICOM files from folder and create complete 3D volume"""
         full_path = self.adni_base_path / dicom_folder_path
         
         if not full_path.exists():
             raise FileNotFoundError(f"DICOM folder not found: {full_path}")
         
-        # Get all DICOM files
-        dicom_files = list(full_path.glob('*.dcm'))
+        # Get all DICOM files recursively
+        dicom_files = []
+        for root, dirs, files in os.walk(full_path):
+            for file in files:
+                if file.lower().endswith('.dcm'):
+                    dicom_files.append(os.path.join(root, file))
+        
         if not dicom_files:
             raise ValueError(f"No DICOM files found in: {full_path}")
         
-        # Load and sort DICOM files
+        print(f"   📁 Found {len(dicom_files)} DICOM files for {dicom_folder_path}")
+        
+        # Load and sort DICOM files with better sorting logic
         dicom_data = []
         for dcm_file in dicom_files:
             try:
                 ds = pydicom.dcmread(dcm_file)
-                if hasattr(ds, 'pixel_array') and hasattr(ds, 'SliceLocation'):
-                    dicom_data.append((ds.SliceLocation, ds.pixel_array))
+                if hasattr(ds, 'pixel_array'):
+                    # Try multiple sorting methods
+                    sort_key = None
+                    if hasattr(ds, 'SliceLocation'):
+                        sort_key = float(ds.SliceLocation)
+                    elif hasattr(ds, 'ImagePositionPatient') and len(ds.ImagePositionPatient) >= 3:
+                        sort_key = float(ds.ImagePositionPatient[2])  # Z-coordinate
+                    elif hasattr(ds, 'InstanceNumber'):
+                        sort_key = int(ds.InstanceNumber)
+                    else:
+                        sort_key = 0  # Fallback
+                    
+                    dicom_data.append((sort_key, ds.pixel_array))
             except Exception as e:
+                print(f"     ⚠️ Failed to read {dcm_file}: {e}")
                 continue
         
         if not dicom_data:
             raise ValueError(f"No valid DICOM data found in: {full_path}")
         
-        # Sort by slice location and stack
+        print(f"   ✅ Loaded {len(dicom_data)} valid slices")
+        
+        # Sort by the chosen key and stack
         dicom_data.sort(key=lambda x: x[0])
         volume = np.stack([data[1] for data in dicom_data], axis=0)
         
         return volume.astype(np.float32)
     
     def preprocess_volume(self, volume):
-        """Preprocess 3D volume: normalize and resize"""
-        # Normalize to [0, 1]
-        volume = (volume - volume.min()) / (volume.max() - volume.min() + 1e-8)
+        """Preprocess 3D volume: robust normalization and intelligent resizing"""
+        print(f"     🔄 Original volume shape: {volume.shape}")
         
-        # Simple resize by taking every nth slice/pixel
+        # 1. Robust intensity normalization (percentile-based)
+        # Remove extreme outliers before normalization
+        p1, p99 = np.percentile(volume, [1, 99])
+        volume = np.clip(volume, p1, p99)
+        
+        # Z-score normalization (better than min-max for MRI)
+        volume = (volume - volume.mean()) / (volume.std() + 1e-8)
+        
+        # 2. Intelligent resizing
         current_shape = volume.shape
-        resize_factors = [current_shape[i] // self.target_size[i] for i in range(3)]
-        resize_factors = [max(1, f) for f in resize_factors]  # Ensure at least 1
+        print(f"     📆 Target shape: {self.target_size}")
         
-        # Downsample
-        resized = volume[::resize_factors[0], ::resize_factors[1], ::resize_factors[2]]
+        # Use scipy for better interpolation if available
+        try:
+            from scipy.ndimage import zoom
+            
+            # Calculate zoom factors
+            zoom_factors = [
+                self.target_size[i] / current_shape[i] for i in range(3)
+            ]
+            print(f"     🔍 Zoom factors: {zoom_factors}")
+            
+            # Apply zoom with better interpolation
+            resized = zoom(volume, zoom_factors, order=1, mode='nearest')
+            
+        except ImportError:
+            # Fallback to simple downsampling
+            print("     ⚠️ Using simple downsampling (scipy not available)")
+            resize_factors = [max(1, current_shape[i] // self.target_size[i]) for i in range(3)]
+            resized = volume[::resize_factors[0], ::resize_factors[1], ::resize_factors[2]]
+            
+            # Pad or crop to exact target size
+            final_volume = np.zeros(self.target_size)
+            min_shape = [min(resized.shape[i], self.target_size[i]) for i in range(3)]
+            final_volume[:min_shape[0], :min_shape[1], :min_shape[2]] = resized[:min_shape[0], :min_shape[1], :min_shape[2]]
+            resized = final_volume
         
-        # Pad or crop to exact target size
-        final_volume = np.zeros(self.target_size)
-        min_shape = [min(resized.shape[i], self.target_size[i]) for i in range(3)]
-        final_volume[:min_shape[0], :min_shape[1], :min_shape[2]] = resized[:min_shape[0], :min_shape[1], :min_shape[2]]
-        
-        return final_volume
+        print(f"     ✅ Final shape: {resized.shape}")
+        return resized.astype(np.float32)
     
     def __getitem__(self, idx):
         row = self.df.iloc[idx]
         
         try:
+            print(f"   📂 Loading {row['Subject']} ({row['Group']})...")
+            
             # Load DICOM volume
             volume = self.load_dicom_volume(row['dicom_folder_path'])
             
@@ -109,10 +156,12 @@ class MRIDataset(Dataset):
             
             label = torch.LongTensor([row['label']])[0]
             
+            print(f"   ✅ Successfully loaded {row['Subject']} - Shape: {volume.shape}, Label: {label}")
             return volume, label
             
         except Exception as e:
-            print(f"⚠️ Error loading {row['Subject']}: {e}")
+            print(f"   ❌ Error loading {row['Subject']}: {e}")
+            print(f"   🗗️ Returning dummy sample for {row['Subject']}")
             # Return a dummy sample
             dummy_volume = torch.zeros(1, *self.target_size)
             return dummy_volume, torch.LongTensor([0])[0]
@@ -487,8 +536,8 @@ def main():
     print(f"   • Training samples: {len(train_df)}")
     print(f"   • Test samples: {len(test_df)}")
     
-    # Create datasets
-    target_size = (64, 64, 64)  # Manageable size for training
+    # Create datasets with better resolution
+    target_size = (96, 96, 96)  # Better resolution for improved accuracy
     
     # Split training data for validation (80/20)
     train_size = int(0.8 * len(train_df))
@@ -500,7 +549,7 @@ def main():
     test_dataset = MRIDataset(test_df, adni_base_path, target_size=target_size)
     
     # Create data loaders
-    batch_size = 4  # Small batch size for 3D data
+    batch_size = 8  # Small batch size for 3D data
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=0)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=0)
     test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=0)
