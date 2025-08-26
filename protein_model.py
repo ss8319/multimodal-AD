@@ -127,7 +127,7 @@ def extract_features(model: nn.Module, data_loader) -> np.ndarray:
             hidden_features = model.extract_features(batch_x) # Get the bottleneck features
             features.append(hidden_features.numpy())
     return np.concatenate(features, axis=0)
-    
+
 def create_data_loaders(X_train: np.ndarray, X_test: np.ndarray, 
                        batch_size: int = 16) -> Tuple[torch.utils.data.DataLoader, torch.utils.data.DataLoader]:
     """Create data loaders for training"""
@@ -165,8 +165,8 @@ def train_autoencoder_pipeline(config: 'AutoencoderConfig', dataset_config: 'Dat
         dataset_config.metadata_path, dataset_config.exclude_columns, 'autoencoder'
     )
     logger.info(f"Data loaded: {X_scaled.shape[0]} samples, {X_scaled.shape[1]} features")
-
-# Split data
+    
+    # Split data
     X_train, X_test = train_test_split(
         X_scaled, test_size=config.test_size, random_state=config.random_state
     )
@@ -174,8 +174,8 @@ def train_autoencoder_pipeline(config: 'AutoencoderConfig', dataset_config: 'Dat
     
     # Create data loaders
     train_loader, test_loader = create_data_loaders(X_train, X_test, config.batch_size)
-
-# Initialize model
+    
+    # Initialize model
     input_size = len(proteomic_cols) # number of features
     model = ProteinAutoencoder(input_size, config.hidden_size, config.dropout_rate)
     logger.info(f"Model initialized: {input_size} -> {config.hidden_size} -> {input_size}")
@@ -195,10 +195,10 @@ def train_autoencoder_pipeline(config: 'AutoencoderConfig', dataset_config: 'Dat
     # Load best model
     model.load_state_dict(torch.load(paths['best_model']))
     logger.info("Best model loaded for feature extraction")
-
-# Extract features
+    
+    # Extract features
     logger.info("Extracting features...")
-train_features = extract_features(model, train_loader)
+    train_features = extract_features(model, train_loader)
     test_features = extract_features(model, test_loader)
     
     logger.info(f"Training features shape: {train_features.shape}")
