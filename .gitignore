@@ -5,6 +5,7 @@ Papers/
 MRI/
 __pycache__/
 /colab/data
+research_pipeline/image_classification/logs
 
 *.pyc
 *.pyo

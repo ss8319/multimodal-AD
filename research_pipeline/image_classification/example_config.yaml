@@ -1,0 +1,64 @@
+# Example Configuration for 3D MRI Classification Pipeline
+# Edit this file to customize your experiment settings
+
+experiment_name: "example_mri_experiment"
+output_dir: "D:/ADNI/research_pipeline/image_classification/logs"
+
+# Logging and saving options
+save_model: true
+save_results: true
+enable_visualization: true
+enable_quality_control: true  # Run comprehensive QC checks
+qc_sample_count: 3  # Number of samples to QC
+
+# Training configuration
+training:
+  # Model selection (choose from: resnet3d, alexnet3d, convnext3d, vit3d, bmmae_frozen, bmmae_finetuned)
+  methods: ["bmmae_frozen"]
+  
+  # Training parameters
+  epochs: 12
+  learning_rate: 0.0005
+  batch_size: 16
+  weight_decay_classifier_head: 0.0001
+  weight_decay_encoder: 0.0   # only used when fine-tuning
+  
+  # Data parameters
+  target_size: [128, 128, 128]  # 3D volume size (D, H, W)
+  # train_val_split is ignored if cv_fold_indices.csv is present
+  
+  # Regularization
+  early_stopping_patience: 8
+  min_epochs: 5
+  gradient_clip_norm: 1.0
+  
+  # Data augmentation
+  enable_augmentation: true
+  rotation_range: 5.0  # degrees
+  intensity_scale_range: [0.9, 1.1]
+  noise_std: 0.05
+
+# Model-specific configuration
+model:
+  # BM-MAE specific
+  bmmae_pretrained_path: "BM-MAE/pretrained_models/bmmae.pth"
+  
+  # CNN specific
+  cnn_dropout: 0.5
+  
+  # Transformer specific
+  vit_patch_size: 16
+  vit_embed_dim: 768
+
+# Data loading and preprocessing configuration
+data:
+  # Paths
+  adni_base_path: "D:/ADNI/AD_CN/proteomics/Biomarkers Consortium Plasma Proteomics MRM/MRI/ADNI"
+  splits_folder: "D:/ADNI/AD_CN/proteomics/Biomarkers Consortium Plasma Proteomics MRM/MRI/splits"
+  
+  # Preprocessing
+  normalization_method: "percentile_zscore"  # percentile clipping + z-score normalization
+  percentile_range: [0.5, 99.5]
+  
+  # DICOM loading
+  max_files_per_subject: null  # null means load all files
