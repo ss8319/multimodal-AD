@@ -2,7 +2,7 @@
 ADNI/
 morphometry_results/
 Papers/
-MRI/
+# MRI/  # Commented out to allow MRI data and splits
 __pycache__/
 /colab/data
 research_pipeline/image_classification/logs
@@ -13,9 +13,18 @@ research_pipeline/image_classification/logs
 .Python
 *.so
 
-# Ignore all PDF, CSV, and ZIP files anywhere in the repo
+# Ignore all PDF and ZIP files anywhere in the repo
 *.pdf
+
+# Ignore CSV files except important data splits and analysis files
 *.csv
+!AD_CN/proteomics/Biomarkers Consortium Plasma Proteomics MRM/MRI/splits/*.csv
+!**/splits/*.csv
+
+# Ignore large data folders
+AD_CN/proteomics/Biomarkers Consortium Plasma Proteomics MRM/MRI/MRI_AD_CN/
+AD_CN/proteomics/Biomarkers Consortium Plasma Proteomics MRM/MRI/Zip Files/
+
 *.zip
 *.xlsx
 *.xls
