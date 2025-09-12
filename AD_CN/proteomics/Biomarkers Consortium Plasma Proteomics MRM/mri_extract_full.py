@@ -65,7 +65,8 @@ except Exception:  # tqdm optional fall-back
 
 
 # Scan-type filter (case-insensitive)
-SCAN_PATTERN = r"(mp-?rage|mprage|ir-?spgr|fspgr|bravo|3d\s*t1|sag.*t1)"
+# SCAN_PATTERN = r"(mp-?rage|mprage|ir-?spgr|fspgr|bravo|3d\s*t1|sag.*t1)"
+SCAN_PATTERN = r"(mp-?rage|mprage)"
 
 
 def shorten_filename_only_if_needed(base_dir: Path, rel_path: Path, max_total_len: int, crc_hex: str) -> Path:
@@ -192,8 +193,8 @@ def extract_preserving_dirs_and_filter(
 
 if __name__ == "__main__":
     # Defaults (edit as needed or pass via CLI)
-    zip_file = r"D:\ADNI\AD_CN\proteomics\Biomarkers Consortium Plasma Proteomics MRM\MRI\AD_CN_all_available_data.zip"
-    extract_dir = r"D:\ADNI\AD_CN\proteomics\Biomarkers Consortium Plasma Proteomics MRM\MRI\extracted_images_new"
+    zip_file = r"D:\ADNI\AD_CN\proteomics\Biomarkers Consortium Plasma Proteomics MRM\MRI\AD_CN_all_available_data_91gb.zip"
+    extract_dir = r"C:\Users\User\github_repos\AD_CN_all_available_data_133gb_mprage"
     overwrite_flag = False  # set True to force re-write
 
     # CLI usage: python mri_extract_full.py <zip> <out_dir> [--overwrite] [--workers N]
