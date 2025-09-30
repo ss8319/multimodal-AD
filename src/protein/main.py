@@ -30,7 +30,7 @@ def main(args):
         train_path=args.train_data,
         test_path=args.test_data
     )
-    
+
     # ==================================================
     # 2. SETUP CROSS-VALIDATION
     # ==================================================
@@ -59,9 +59,9 @@ def main(args):
     print(f"   • Number of folds: {args.n_folds}")
     print(f"   • Samples per fold: ~{len(X_train) // args.n_folds}")
     
-    # ==================================================
-    # 3. MODEL EVALUATION
-    # ==================================================
+    # # ==================================================
+    # # 3. MODEL EVALUATION
+    # # ==================================================
     print(f"\n🤖 EVALUATING CLASSIFIERS")
     print("-" * 70)
     

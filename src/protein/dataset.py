@@ -58,7 +58,8 @@ class ProteinDataLoader:
         """
         # Identify feature columns (exclude metadata)
         if not self.feature_cols:
-            exclude_cols = [self.id_col, self.label_col, 'VISCODE', 'original_index', 'fold', 'split_type']
+            exclude_cols = [self.id_col, self.label_col, 'VISCODE', 'subject_age']
+            print(f"exclude_cols: {exclude_cols}")
             self.feature_cols = [c for c in df.columns if c not in exclude_cols]
         
         # Extract features and labels

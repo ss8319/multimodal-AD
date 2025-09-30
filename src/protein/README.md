@@ -24,7 +24,7 @@ uv run python src/protein/main.py
 
 # Custom data paths
 uv run python src/protein/main.py \
-  --train-data path/to/train.csv \
+  --train-data 'src\data\protein\proteomic_encoder_data.csv' \
   --test-data path/to/test.csv
 
 # Change CV folds
@@ -171,3 +171,43 @@ All randomness is controlled by `--random-state`:
 - Data shuffling
 
 Same random state → identical results every run.
+
+## Testing
+
+### Run Tests
+
+```bash
+# Install dev dependencies (includes pytest)
+uv sync --extra dev
+
+# Run all tests
+uv run pytest src/protein/test_data_pipeline.py -v
+
+# Run specific test class
+uv run pytest src/protein/test_data_pipeline.py::TestDataStructure -v
+
+# Run with coverage
+uv run pytest src/protein/test_data_pipeline.py --cov=src/protein --cov-report=html
+
+# Run tests that don't require real data
+uv run pytest src/protein/test_data_pipeline.py -k "not real" -v
+```
+
+### Test Coverage
+
+The test suite (`test_data_pipeline.py`) validates:
+
+1. **Data Structure** - Required columns, labels, feature counts
+2. **Data Loader** - Feature extraction, label encoding, scaling, missing values
+3. **Train/Test Split** - No leakage, balance preservation, age distribution
+4. **Cross-Validation** - Fold integrity, stratification, no overlap
+5. **Model I/O** - Input shapes, output validity, probability ranges
+6. **Integration** - Full pipeline from loading to evaluation
+
+### Key Tests
+
+- `test_feature_extraction_excludes_metadata`: Ensures RID, VISCODE, research_group, subject_age are excluded
+- `test_label_encoding`: Validates AD=1, CN=0 encoding
+- `test_no_data_leakage`: Confirms no RID overlap between train/test
+- `test_diagnosis_balance_preserved`: Checks AD/CN ratio consistency
+- `test_cv_stratification`: Validates class balance in CV folds
