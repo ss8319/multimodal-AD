@@ -7,7 +7,7 @@ import pickle
 from pathlib import Path
 from sklearn.model_selection import StratifiedKFold
 from sklearn.base import clone
-from sklearn.metrics import accuracy_score, roc_auc_score
+from sklearn.metrics import accuracy_score, roc_auc_score, confusion_matrix
 
 
 def save_cv_fold_indices(X, y, df, cv_splitter, output_path, id_col='RID'):
@@ -49,7 +49,35 @@ def save_cv_fold_indices(X, y, df, cv_splitter, output_path, id_col='RID'):
     return fold_df
 
 
-def evaluate_model_cv(clf, X_train, y_train, X_test, y_test, cv_splitter, clf_name="Model"):
+def compute_confusion_metrics(y_true, y_pred):
+    """
+    Compute confusion matrix and derived metrics
+    
+    Args:
+        y_true: True labels
+        y_pred: Predicted labels
+        
+    Returns:
+        dict with confusion matrix metrics
+    """
+    cm = confusion_matrix(y_true, y_pred)
+    tn, fp, fn, tp = cm.ravel()
+    
+    sensitivity = tp / (tp + fn) if (tp + fn) > 0 else 0
+    specificity = tn / (tn + fp) if (tn + fp) > 0 else 0
+    ppv = tp / (tp + fp) if (tp + fp) > 0 else 0
+    npv = tn / (tn + fn) if (tn + fn) > 0 else 0
+    
+    return {
+        'tn': int(tn), 'fp': int(fp), 'fn': int(fn), 'tp': int(tp),
+        'sensitivity': sensitivity,
+        'specificity': specificity,
+        'ppv': ppv,
+        'npv': npv
+    }
+
+
+def evaluate_model_cv(clf, X_train, y_train, X_test, y_test, cv_splitter, clf_name="Model", compute_test_confusion=False):
     """
     Evaluate a classifier using cross-validation and optional test set
     
@@ -61,6 +89,7 @@ def evaluate_model_cv(clf, X_train, y_train, X_test, y_test, cv_splitter, clf_na
         y_test: Test labels (can be None)
         cv_splitter: sklearn CV splitter
         clf_name: Name of classifier for logging
+        compute_test_confusion: If True, compute confusion matrix on test set
     
     Returns:
         dict with CV and test metrics
@@ -143,17 +172,27 @@ def evaluate_model_cv(clf, X_train, y_train, X_test, y_test, cv_splitter, clf_na
             'test_auc_scores': test_auc_scores.tolist(),
             'test_acc_scores': test_acc_scores.tolist(),
         })
+        
+        # Optionally compute confusion matrix on full test set
+        if compute_test_confusion:
+            # Train on full training set for final test evaluation
+            final_clf = clone(clf)
+            final_clf.fit(X_train, y_train)
+            test_pred_final = final_clf.predict(X_test)
+            confusion_metrics = compute_confusion_metrics(y_test, test_pred_final)
+            results.update(confusion_metrics)
     
     return results
 
 
-def print_results_summary(results_df, test_available=False):
+def print_results_summary(results_df, test_available=False, show_confusion=False):
     """
     Print formatted results summary
     
     Args:
         results_df: DataFrame with evaluation results
         test_available: Whether test set results are available
+        show_confusion: Whether to show confusion matrix metrics
     """
     print(f"\n🏆 FINAL RESULTS SUMMARY")
     print("=" * 60)
@@ -187,6 +226,18 @@ def print_results_summary(results_df, test_available=False):
     if test_available and 'test_auc_mean' in best_model:
         print(f"   • Test AUC: {best_model['test_auc_mean']:.3f} ± {best_model['test_auc_std']:.3f}")
         print(f"   • Test Accuracy: {best_model['test_acc_mean']:.3f} ± {best_model['test_acc_std']:.3f}")
+    
+    # Show confusion matrix if requested and available
+    if show_confusion and 'tn' in best_model:
+        print(f"\n📊 Confusion Matrix (Test Set):")
+        print(f"                Predicted")
+        print(f"              CN (0)  AD (1)")
+        print(f"Actual CN (0)   {best_model['tn']:4.0f}    {best_model['fp']:4.0f}")
+        print(f"       AD (1)   {best_model['fn']:4.0f}    {best_model['tp']:4.0f}")
+        print(f"\n   Sensitivity: {best_model['sensitivity']:.3f}")
+        print(f"   Specificity: {best_model['specificity']:.3f}")
+        print(f"   PPV:         {best_model['ppv']:.3f}")
+        print(f"   NPV:         {best_model['npv']:.3f}")
 
 
 def save_results(results_dict, output_dir):

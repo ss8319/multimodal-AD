@@ -25,7 +25,7 @@ uv run python src/protein/main.py
 # Custom data paths
 uv run python src/protein/main.py \
   --train-data 'src\data\protein\proteomic_encoder_data.csv' \
-  --test-data path/to/test.csv
+  --test-data 'src\data\protein\proteomic_encoder_test.csv'
 
 # Change CV folds
 uv run python src/protein/main.py --n-folds 10

@@ -70,10 +70,10 @@ def main(args):
     detailed_results = {}
     
     test_available = X_test is not None
-    
+
     for clf_name, clf in classifiers.items():
         print(f"\n🔄 {clf_name}...")
-        
+
         try:
             # Evaluate model with CV and optional test set
             result = evaluate_model_cv(
@@ -83,29 +83,30 @@ def main(args):
                 X_test=X_test,
                 y_test=y_test,
                 cv_splitter=cv_splitter,
-                clf_name=clf_name
+                clf_name=clf_name,
+                compute_test_confusion=args.show_confusion
             )
-            
+
             results.append(result)
             detailed_results[clf_name] = result
-            
+
             # Print results
             print(f"   ✅ CV-AUC: {result['cv_auc_mean']:.3f} ± {result['cv_auc_std']:.3f}")
             print(f"   ✅ CV-Acc: {result['cv_acc_mean']:.3f} ± {result['cv_acc_std']:.3f}")
-            
+
             if test_available:
                 print(f"   🎯 Test-AUC: {result['test_auc_mean']:.3f} ± {result['test_auc_std']:.3f}")
                 print(f"   🎯 Test-Acc: {result['test_acc_mean']:.3f} ± {result['test_acc_std']:.3f}")
-                
+
         except Exception as e:
             print(f"   ❌ Error: {str(e)[:50]}...")
             continue
-    
+
     # ==================================================
     # 4. RESULTS SUMMARY
     # ==================================================
     results_df = pd.DataFrame(results)
-    print_results_summary(results_df, test_available=test_available)
+    print_results_summary(results_df, test_available=test_available, show_confusion=args.show_confusion)
     
     # ==================================================
     # 5. SAVE RESULTS
@@ -167,6 +168,11 @@ if __name__ == "__main__":
         type=int,
         default=42,
         help="Random seed for reproducibility"
+    )
+    parser.add_argument(
+        "--show-confusion",
+        action="store_true",
+        help="Show detailed confusion matrix for best model on test set"
     )
     
     args = parser.parse_args()
