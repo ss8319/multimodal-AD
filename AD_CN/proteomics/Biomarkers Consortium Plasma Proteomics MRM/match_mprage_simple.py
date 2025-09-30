@@ -278,15 +278,68 @@ def match_proteomic_mri_mprage(csv1_path, csv2_path, output_path=None):
         for record in matched_records:
             all_columns.update(record.keys())
         
-        print(f"📊 Writing {len(matched_records)} records with {len(all_columns)} columns...")
+        # Organize columns: metadata first, then proteins
+        print("🔄 Organizing columns: metadata first, then proteins...")
+        
+        # Define metadata columns (order matters)
+        metadata_columns = [
+            # Core identifiers
+            'RID', 'Subject', 'VISCODE', 'Visit', 'VISCODE_norm', 'Visit_norm',
+            # Subject info
+            'research_group', 'Group', 'Sex', 'Age', 'subject_age',
+            # MRI scan info
+            'Image Data ID', 'Description', 'Type', 'Modality', 'Format',
+            'Acq Date', 'Downloaded', 'MRI_acquired',
+            # Additional extracted fields
+            'RID_extracted'
+        ]
+        
+        # Find protein columns (anything that contains '_' and looks like a protein)
+        protein_columns = []
+        other_columns = []
+        
+        for col in all_columns:
+            if col not in metadata_columns:
+                # Protein columns typically have format like "PROTEIN_PEPTIDE" 
+                if '_' in col and col.upper() == col:  # All caps with underscore
+                    protein_columns.append(col)
+                else:
+                    other_columns.append(col)
+        
+        # Sort protein columns alphabetically for consistency
+        protein_columns.sort()
+        other_columns.sort()
+        
+        # Final column order: metadata -> proteins -> others
+        ordered_columns = []
+        
+        # Add metadata columns that exist in data
+        for col in metadata_columns:
+            if col in all_columns:
+                ordered_columns.append(col)
+        
+        # Add other non-protein columns
+        ordered_columns.extend(other_columns)
+        
+        # Add protein columns at the end
+        ordered_columns.extend(protein_columns)
+        
+        print(f"📊 Column organization:")
+        print(f"  - Metadata columns: {len([c for c in metadata_columns if c in all_columns])}")
+        print(f"  - Other columns: {len(other_columns)}")
+        print(f"  - Protein columns: {len(protein_columns)}")
+        print(f"  - Total columns: {len(ordered_columns)}")
+        
+        print(f"📊 Writing {len(matched_records)} records with organized columns...")
         
         with open(output_path, 'w', newline='', encoding='utf-8') as file:
-            writer = csv.DictWriter(file, fieldnames=sorted(all_columns))
+            writer = csv.DictWriter(file, fieldnames=ordered_columns)
             writer.writeheader()
             writer.writerows(matched_records)
         
         print("✅ Merged data saved successfully!")
         print(f"📁 File saved: {output_path}")
+        print("📋 Column order: Metadata → Other → Proteins (alphabetical)")
     
     return matched_records
 
