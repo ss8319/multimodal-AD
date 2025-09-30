@@ -13,11 +13,6 @@ from utils import save_cv_fold_indices, evaluate_model_cv, print_results_summary
 
 def main(args):
     """Run protein classification experiments"""
-    
-    print("=" * 70)
-    print("🧬 PROTEIN CLASSIFICATION EXPERIMENT")
-    print("=" * 70)
-    
     # ==================================================
     # 1. DATA LOADING AND PREPROCESSING
     # ==================================================
@@ -136,13 +131,13 @@ if __name__ == "__main__":
     parser.add_argument(
         "--train-data",
         type=str,
-        default="src/data/protein/proteomic_train_set.csv",
+        default="src/data/protein/proteomic_encoder_train.csv",
         help="Path to training data CSV"
     )
     parser.add_argument(
         "--test-data",
         type=str,
-        default="src/data/protein/proteomic_mri_with_labels.csv",
+        default="src/data/protein/proteomic_encoder_test.csv",
         help="Path to test data CSV (optional)"
     )
     
