@@ -1,0 +1,3 @@
+[submodule "src/mri/BrainIAC"]
+	path = src/mri/BrainIAC
+	url = https://github.com/ss8319/BrainIAC.git
