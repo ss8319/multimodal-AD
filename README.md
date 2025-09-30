@@ -21,10 +21,13 @@ or use `uv run`.
 uv add package-name
 ```
 
-### Organisation
-multimodal-AD/src/data
-multimodal-AD/src/mri/BrainIAC
-multimodal-AD/src/mri/unimodal baselines
-multimodal-AD/src/protein/
-multimodal-AD/src/integration
-multimodal-AD/src/
+## Code Organisation
+
+- **`src/data/`**: Dataset pipelines
+- **`src/mri/BrainIAC/`**: BrainIAC foundation model 
+- **`src/protein/`**: Proteomics training 
+- **`src/integration/`**: Experiments for fusing latent representations between modalities
+
+## 📊 Data Sources
+
+- **ADNI**: Alzheimer's Disease Neuroimaging Initiative
