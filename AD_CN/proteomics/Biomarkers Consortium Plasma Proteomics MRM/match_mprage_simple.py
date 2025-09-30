@@ -1,5 +1,8 @@
 import csv
 import re
+import shutil
+import os
+from pathlib import Path
 from collections import defaultdict, Counter
 
 def extract_rid_from_subject(subject_id):
@@ -392,6 +395,163 @@ def count_unique_rids_mprage(csv_file_path):
         'rid_counts': rid_counts
     }
 
+def copy_matched_mri_images_simple(csv_file_path, source_root_dir, target_root_dir):
+    """
+    Copy MRI image folders for matched subjects based on CSV data
+    
+    Args:
+        csv_file_path: Path to the merged CSV file
+        source_root_dir: Root directory where ADNI images are stored
+        target_root_dir: Target directory for copied images
+        
+    Returns:
+        dict: Statistics about the copy operation
+    """
+    print(f"\n📁 Copying matched MRI images...")
+    print("=" * 60)
+    print(f"Reading from CSV: {csv_file_path}")
+    print(f"Source root: {source_root_dir}")
+    print(f"Target root: {target_root_dir}")
+    
+    # Create target directory
+    target_path = Path(target_root_dir)
+    target_path.mkdir(parents=True, exist_ok=True)
+    
+    source_path = Path(source_root_dir)
+    if not source_path.exists():
+        print(f"❌ Source directory not found: {source_root_dir}")
+        return {'error': 'Source directory not found'}
+    
+    stats = {
+        'subjects_processed': 0,
+        'subjects_found': 0,
+        'subjects_not_found': 0,
+        'folders_copied': 0,
+        'folders_skipped': 0,
+        'errors': 0
+    }
+    
+    # Read the CSV file
+    print(f"\n🔄 Reading CSV file...")
+    matched_subjects = []
+    
+    with open(csv_file_path, 'r', encoding='utf-8') as file:
+        reader = csv.DictReader(file)
+        for row in reader:
+            matched_subjects.append({
+                'subject': row['Subject'],
+                'description': row['Description'], 
+                'image_data_id': row['Image Data ID'],
+                'rid': row['RID']
+            })
+    
+    print(f"📊 Found {len(matched_subjects)} subjects to process")
+    
+    # Process each subject
+    for i, subject_info in enumerate(matched_subjects, 1):
+        subject_id = subject_info['subject']
+        description = subject_info['description'].strip()  # Remove leading/trailing spaces
+        image_data_id = subject_info['image_data_id']
+        rid = subject_info['rid']
+        
+        print(f"\n[{i:2d}/{len(matched_subjects)}] Processing RID {rid} ({subject_id})")
+        print(f"  Description: '{description}'")
+        print(f"  Image Data ID: {image_data_id}")
+        
+        stats['subjects_processed'] += 1
+        
+        try:
+            # Build expected source path: source_root/ADNI/subject/description/*/image_data_id
+            subject_dir = source_path / "ADNI" / subject_id
+            
+            if not subject_dir.exists():
+                print(f"  ❌ Subject directory not found: {subject_dir}")
+                stats['subjects_not_found'] += 1
+                continue
+            
+            # Clean description: replace spaces with underscores for folder matching
+            description_clean = description.replace(' ', '_')
+            
+            # Look for description directory with multiple variations
+            description_patterns = [
+                description,  # Original with spaces
+                description_clean,  # With underscores
+                description.replace(' ', ''),  # No spaces
+                description.replace(' ', '-'),  # With hyphens
+            ]
+            
+            description_dirs = []
+            for pattern in description_patterns:
+                dirs = list(subject_dir.glob(f"*{pattern}*"))
+                if dirs:
+                    description_dirs = dirs
+                    print(f"  ✓ Found description match with pattern: '{pattern}'")
+                    break
+            
+            if not description_dirs:
+                print(f"  ❌ Description directory not found for: '{description}' (tried patterns: {description_patterns})")
+                # List available directories for debugging
+                available_dirs = [d.name for d in subject_dir.iterdir() if d.is_dir()]
+                print(f"  Available directories: {available_dirs}")
+                stats['subjects_not_found'] += 1
+                continue
+            
+            # Use the first matching description directory
+            description_dir = description_dirs[0]
+            print(f"  ✓ Found description dir: {description_dir.name}")
+            
+            # Look for image data ID directory (could be nested under date directories)
+            image_dirs = list(description_dir.rglob(image_data_id))
+            if not image_dirs:
+                print(f"  ❌ Image Data ID directory not found: {image_data_id}")
+                stats['subjects_not_found'] += 1
+                continue
+            
+            # Use the first matching image directory
+            source_image_dir = image_dirs[0]
+            print(f"  ✓ Found image dir: {source_image_dir}")
+            
+            # Build target path maintaining the same structure
+            # Extract the relative path from ADNI onwards
+            relative_path = source_image_dir.relative_to(source_path / "ADNI")
+            target_image_dir = target_path / relative_path
+            
+            print(f"  📁 Target: {target_image_dir}")
+            
+            # Check if target already exists
+            if target_image_dir.exists():
+                print(f"  ⚠️  Target directory already exists, skipping...")
+                stats['folders_skipped'] += 1
+                continue
+            
+            # Copy the entire directory
+            print(f"  🔄 Copying directory...")
+            shutil.copytree(source_image_dir, target_image_dir)
+            
+            # Count files copied
+            files_in_dir = len(list(target_image_dir.rglob("*")))
+            print(f"  ✅ Copied directory with {files_in_dir} items")
+            
+            stats['subjects_found'] += 1
+            stats['folders_copied'] += 1
+            
+        except Exception as e:
+            print(f"  ❌ Error processing {subject_id}: {e}")
+            stats['errors'] += 1
+    
+    # Print summary
+    print(f"\n📊 COPY OPERATION SUMMARY")
+    print("=" * 60)
+    print(f"Subjects processed: {stats['subjects_processed']}")
+    print(f"Subjects with images found: {stats['subjects_found']}")
+    print(f"Subjects with no images: {stats['subjects_not_found']}")
+    print(f"Folders copied: {stats['folders_copied']}")
+    print(f"Folders skipped (existing): {stats['folders_skipped']}")
+    print(f"Errors encountered: {stats['errors']}")
+    print(f"Target directory: {target_root_dir}")
+    
+    return stats
+
 if __name__ == "__main__":
     # File paths
     csv1_path = r"D:\ADNI\AD_CN\proteomics\Biomarkers Consortium Plasma Proteomics MRM\proteomic_mri_with_labels.csv"
@@ -403,8 +563,18 @@ if __name__ == "__main__":
     
     # Count unique RIDs
     stats = count_unique_rids_mprage(output_path)
+
+    # Copy matched MRI images to organized folder
+    source_root_dir = r"C:\Users\User\github_repos\AD_CN_all_available_data_final"
+    target_root_dir = r"C:\Users\User\github_repos\AD_CN_MRI_final"
     
-    print(f"\n✅ Data matching completed!")
+    print(f"\n🔄 Starting MRI image copy operation...")
+    copy_stats = copy_matched_mri_images_simple(output_path, source_root_dir, target_root_dir)
+    
+    print(f"\n✅ Data matching and image copying completed!")
     print(f"📊 Final merged dataset: {len(merged_data)} records")
     print(f"🎯 ANSWER: There are {stats['unique_rids']} unique RID fields in the MPRAGE-filtered dataset")
-    print(f"💾 Saved to: {output_path}")
+    print(f"💾 CSV saved to: {output_path}")
+    print(f"📁 Images copied to: {target_root_dir}")
+    if 'error' not in copy_stats:
+        print(f"🖼️  Image folders copied: {copy_stats['folders_copied']}/{stats['unique_rids']}")
