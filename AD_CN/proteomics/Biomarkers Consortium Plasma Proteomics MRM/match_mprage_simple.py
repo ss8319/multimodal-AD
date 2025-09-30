@@ -113,7 +113,7 @@ def match_proteomic_mri_mprage(csv1_path, csv2_path, output_path=None):
     """
     Match proteomic data with MPRAGE MRI data
     """
-    print("🔍 Loading datasets...")
+    print(" Loading datasets...")
     print("=" * 60)
     
     # Load data
@@ -129,7 +129,7 @@ def match_proteomic_mri_mprage(csv1_path, csv2_path, output_path=None):
         if rid and viscode_norm:
             key = (rid, viscode_norm)
             if key in proteomic_lookup:
-                print(f"  [{i+1:2d}] ⚠️  DUPLICATE KEY: RID {rid}, VISCODE '{row['VISCODE']}' -> '{viscode_norm}' (overwriting previous)")
+                print(f"  [{i+1:2d}] WARNING  DUPLICATE KEY: RID {rid}, VISCODE '{row['VISCODE']}' -> '{viscode_norm}' (overwriting previous)")
             proteomic_lookup[key] = row
             print(f"  [{i+1:2d}] RID {rid}, VISCODE '{row['VISCODE']}' -> '{viscode_norm}' ✓")
         else:
@@ -142,7 +142,7 @@ def match_proteomic_mri_mprage(csv1_path, csv2_path, output_path=None):
     matched_keys = set()
     match_count = 0
     
-    print("\n🔗 Matching datasets on RID and Visit (MPRAGE only)...")
+    print("\n Matching datasets on RID and Visit (MPRAGE only)...")
     print("=" * 60)
     
     for i, mri_row in enumerate(mri_mprage):
@@ -171,10 +171,10 @@ def match_proteomic_mri_mprage(csv1_path, csv2_path, output_path=None):
             if i < 10:  # Show first 10 invalid records for debugging
                 print(f"  [--] ✗ INVALID: Subject '{subject}', Visit '{visit}' | RID: {rid_extracted}, Visit_norm: {visit_norm}")
     
-    print(f"\n✅ Successfully matched {len(matched_records)} records")
+    print(f"\nOK Successfully matched {len(matched_records)} records")
     
     # Identify missing subjects from proteomic data
-    print(f"\n🔍 Analyzing missing subjects from proteomic data...")
+    print(f"\n Analyzing missing subjects from proteomic data...")
     print("=" * 60)
     matched_rids = set()
     for key in matched_keys:
@@ -197,10 +197,10 @@ def match_proteomic_mri_mprage(csv1_path, csv2_path, output_path=None):
                 row = rid_to_proteomic[rid]
                 print(f"  RID {rid}: VISCODE '{row['VISCODE']}' -> '{normalize_viscode(row['VISCODE'])}' | Group: {row.get('research_group', 'Unknown')}")
             else:
-                print(f"  RID {rid}: ⚠️  Not found in proteomic data")
+                print(f"  RID {rid}: WARNING  Not found in proteomic data")
     
     # Check for multiple MPRAGE scans per subject
-    print("\n🔍 Checking for multiple MPRAGE scans per subject...")
+    print("\n Checking for multiple MPRAGE scans per subject...")
     print("=" * 60)
     rid_counts = Counter()
     for record in matched_records:
@@ -210,7 +210,7 @@ def match_proteomic_mri_mprage(csv1_path, csv2_path, output_path=None):
     multiple_scans = {rid: count for rid, count in rid_counts.items() if count > 1}
     
     if multiple_scans:
-        print(f"⚠️  Found {len(multiple_scans)} subjects with multiple MPRAGE scans:")
+        print(f"WARNING  Found {len(multiple_scans)} subjects with multiple MPRAGE scans:")
         for rid, count in list(multiple_scans.items())[:10]:
             print(f"  RID {rid}: {count} MPRAGE scans")
         
@@ -232,7 +232,7 @@ def match_proteomic_mri_mprage(csv1_path, csv2_path, output_path=None):
         matched_records = deduplicated_records
         print(f"\n📊 After deduplication: {len(matched_records)} records")
     else:
-        print("✅ All subjects have exactly one MPRAGE scan")
+        print("OK All subjects have exactly one MPRAGE scan")
     
     # Display statistics
     print("\n📊 MERGE STATISTICS")
@@ -262,7 +262,7 @@ def match_proteomic_mri_mprage(csv1_path, csv2_path, output_path=None):
         print(f"  {group}: {count} subjects")
     
     # Sample of merged data
-    print("\n🔍 Sample merged data:")
+    print("\n Sample merged data:")
     print("=" * 60)
     if matched_records:
         sample_record = matched_records[0]
@@ -273,7 +273,7 @@ def match_proteomic_mri_mprage(csv1_path, csv2_path, output_path=None):
     
     # Save merged data
     if output_path and matched_records:
-        print(f"\n💾 Saving merged data to: {output_path}")
+        print(f"\nSAVED: Saving merged data to: {output_path}")
         print("=" * 60)
         
         # Get all unique column names
@@ -340,8 +340,8 @@ def match_proteomic_mri_mprage(csv1_path, csv2_path, output_path=None):
             writer.writeheader()
             writer.writerows(matched_records)
         
-        print("✅ Merged data saved successfully!")
-        print(f"📁 File saved: {output_path}")
+        print("OK Merged data saved successfully!")
+        print(f"FOLDER: File saved: {output_path}")
         print("📋 Column order: Metadata → Other → Proteins (alphabetical)")
     
     return matched_records
@@ -350,7 +350,7 @@ def count_unique_rids_mprage(csv_file_path):
     """
     Count unique RID values in the MPRAGE-filtered merged CSV file
     """
-    print(f"\n🔍 Analyzing unique RIDs in MPRAGE-filtered dataset: {csv_file_path}")
+    print(f"\n Analyzing unique RIDs in MPRAGE-filtered dataset: {csv_file_path}")
     print("=" * 60)
     
     rids = []
@@ -407,7 +407,7 @@ def copy_matched_mri_images_simple(csv_file_path, source_root_dir, target_root_d
     Returns:
         dict: Statistics about the copy operation
     """
-    print(f"\n📁 Copying matched MRI images...")
+    print(f"\nFOLDER: Copying matched MRI images...")
     print("=" * 60)
     print(f"Reading from CSV: {csv_file_path}")
     print(f"Source root: {source_root_dir}")
@@ -419,7 +419,7 @@ def copy_matched_mri_images_simple(csv_file_path, source_root_dir, target_root_d
     
     source_path = Path(source_root_dir)
     if not source_path.exists():
-        print(f"❌ Source directory not found: {source_root_dir}")
+        print(f"ERROR Source directory not found: {source_root_dir}")
         return {'error': 'Source directory not found'}
     
     stats = {
@@ -461,66 +461,53 @@ def copy_matched_mri_images_simple(csv_file_path, source_root_dir, target_root_d
         stats['subjects_processed'] += 1
         
         try:
-            # Build expected source path: source_root/ADNI/subject/description/*/image_data_id
+            # Simplified approach: search for Image Data ID directly under subject directory
             subject_dir = source_path / "ADNI" / subject_id
             
             if not subject_dir.exists():
-                print(f"  ❌ Subject directory not found: {subject_dir}")
+                print(f"  ERROR Subject directory not found: {subject_dir}")
                 stats['subjects_not_found'] += 1
                 continue
             
-            # Clean description: replace spaces with underscores for folder matching
-            description_clean = description.replace(' ', '_')
+            # Search for Image Data ID anywhere under the subject directory
+            print(f"   Searching for Image Data ID: {image_data_id}")
+            image_dirs = list(subject_dir.rglob(image_data_id))
             
-            # Look for description directory with multiple variations
-            description_patterns = [
-                description,  # Original with spaces
-                description_clean,  # With underscores
-                description.replace(' ', ''),  # No spaces
-                description.replace(' ', '-'),  # With hyphens
-            ]
-            
-            description_dirs = []
-            for pattern in description_patterns:
-                dirs = list(subject_dir.glob(f"*{pattern}*"))
-                if dirs:
-                    description_dirs = dirs
-                    print(f"  ✓ Found description match with pattern: '{pattern}'")
-                    break
-            
-            if not description_dirs:
-                print(f"  ❌ Description directory not found for: '{description}' (tried patterns: {description_patterns})")
-                # List available directories for debugging
-                available_dirs = [d.name for d in subject_dir.iterdir() if d.is_dir()]
-                print(f"  Available directories: {available_dirs}")
-                stats['subjects_not_found'] += 1
-                continue
-            
-            # Use the first matching description directory
-            description_dir = description_dirs[0]
-            print(f"  ✓ Found description dir: {description_dir.name}")
-            
-            # Look for image data ID directory (could be nested under date directories)
-            image_dirs = list(description_dir.rglob(image_data_id))
             if not image_dirs:
-                print(f"  ❌ Image Data ID directory not found: {image_data_id}")
+                print(f"  ERROR Image Data ID directory not found: {image_data_id}")
+                # List available directories for debugging
+                print("   Available scan directories:")
+                for scan_dir in subject_dir.iterdir():
+                    if scan_dir.is_dir():
+                        print(f"    - {scan_dir.name}")
+                        # Look for any Image Data ID directories in this scan
+                        for subdir in scan_dir.rglob("I*"):
+                            if subdir.is_dir() and subdir.name.startswith("I"):
+                                print(f"      └─ {subdir.name}")
                 stats['subjects_not_found'] += 1
                 continue
             
             # Use the first matching image directory
             source_image_dir = image_dirs[0]
-            print(f"  ✓ Found image dir: {source_image_dir}")
+            print(f"  OK Found image dir: {source_image_dir}")
+            
+            # Verify this matches our expected description (for logging purposes)
+            actual_description = source_image_dir.parent.parent.name  # Go up two levels to get scan type
+            if description.lower().replace(' ', '') in actual_description.lower().replace('_', '').replace('-', ''):
+                print(f"  OK Description matches: '{actual_description}' ~ '{description}'")
+            else:
+                print(f"  WARNING  Description mismatch: found '{actual_description}', expected '{description}'")
             
             # Build target path maintaining the same structure
             # Extract the relative path from ADNI onwards
             relative_path = source_image_dir.relative_to(source_path / "ADNI")
             target_image_dir = target_path / relative_path
             
-            print(f"  📁 Target: {target_image_dir}")
+            print(f"  FOLDER: Target: {target_image_dir}")
             
             # Check if target already exists
             if target_image_dir.exists():
-                print(f"  ⚠️  Target directory already exists, skipping...")
+                print(f"  WARNING  Target directory already exists, skipping...")
                 stats['folders_skipped'] += 1
                 continue
             
@@ -530,13 +517,13 @@ def copy_matched_mri_images_simple(csv_file_path, source_root_dir, target_root_d
             
             # Count files copied
             files_in_dir = len(list(target_image_dir.rglob("*")))
-            print(f"  ✅ Copied directory with {files_in_dir} items")
+            print(f"  OK Copied directory with {files_in_dir} items")
             
             stats['subjects_found'] += 1
             stats['folders_copied'] += 1
             
         except Exception as e:
-            print(f"  ❌ Error processing {subject_id}: {e}")
+            print(f"  ERROR Error processing {subject_id}: {e}")
             stats['errors'] += 1
     
     # Print summary
@@ -571,10 +558,10 @@ if __name__ == "__main__":
     print(f"\n🔄 Starting MRI image copy operation...")
     copy_stats = copy_matched_mri_images_simple(output_path, source_root_dir, target_root_dir)
     
-    print(f"\n✅ Data matching and image copying completed!")
+    print(f"\nOK Data matching and image copying completed!")
     print(f"📊 Final merged dataset: {len(merged_data)} records")
-    print(f"🎯 ANSWER: There are {stats['unique_rids']} unique RID fields in the MPRAGE-filtered dataset")
-    print(f"💾 CSV saved to: {output_path}")
-    print(f"📁 Images copied to: {target_root_dir}")
+    print(f"ANSWER: ANSWER: There are {stats['unique_rids']} unique RID fields in the MPRAGE-filtered dataset")
+    print(f"SAVED: CSV saved to: {output_path}")
+    print(f"FOLDER: Images copied to: {target_root_dir}")
     if 'error' not in copy_stats:
-        print(f"🖼️  Image folders copied: {copy_stats['folders_copied']}/{stats['unique_rids']}")
+        print(f"IMAGES:  Image folders copied: {copy_stats['folders_copied']}/{stats['unique_rids']}")
