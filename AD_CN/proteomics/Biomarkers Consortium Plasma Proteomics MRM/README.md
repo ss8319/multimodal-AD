@@ -1,35 +1,39 @@
-🗂️ 1. CSFMRM_CONSOLIDATED_DATA.xlsx
-✅ Description:
-A cleaned, quality-controlled, and consolidated version of the data.
+# ADNI Proteomic-MRI Data Processing Pipeline
 
-Likely includes:
+This repository contains scripts for matching and processing ADNI proteomic and MRI data for machine learning applications.
 
-Only peptides that passed QC (e.g. low CVs, good detection)
+## Main Script: `match_mprage_simple.py`
 
-Normalized and log₂-transformed values
+**Purpose**: Matches proteomic data with MPRAGE MRI scans and copies corresponding image files to an organized directory structure.
 
-Well-annotated sample and peptide metadata
+**Key Features**:
+- Matches proteomic subjects with MRI scans based on RID and visit codes
+- Filters for MPRAGE/MP-RAGE scans only
+- Handles duplicate scans (keeps first occurrence per subject)
+- Organizes CSV columns: metadata first, then protein data
+- Copies matched MRI image folders maintaining directory structure
 
-Possibly summary statistics (mean, std, etc.)
+**Input Files**:
+- `proteomic_mri_with_labels.csv` - Proteomic data with subject labels
+- `AD_CN_all_available_data.csv` - MRI metadata from ADNI database
 
-🧠 Use Case:
-Ready for downstream statistical analysis, modeling, and biomarker discovery.
+**Output**:
+- `merged_proteomic_mri_mprage.csv` - Matched dataset with organized columns
+- `C:\Users\User\github_repos\AD_CN_MRI_final\` - Copied MRI image folders
 
-Reflects what the MRM Data Primer calls the "QC-filtered processed peptide-level data".
+**Usage**:
+```bash
+python match_mprage_simple.py
+```
 
-🧾 2. CSFMRM.csv
-✅ Description:
-Likely the raw or minimally processed peptide intensity matrix.
+## Data Files
 
-May include:
+**CSFMRM_23Jun2025.csv**: Raw proteomic data from CSF MRM measurements
+**proteomic_mri_with_labels.csv**: Proteomic data merged with subject labels and visit information
 
-All measured peptides (including those that failed QC)
-
-Raw light/heavy ratios or untransformed intensity values
-
-Possibly more missing data or peptides flagged for exclusion in downstream steps
-
-🧠 Use Case:
-For users who want to re-apply QC, normalization, or examine excluded peptides.
-
-Matches what the primer calls the “raw Skyline export” or raw output before filtering.
+## Directory Structure
+```
+extracted_images/          # Source MRI DICOM files
+merged_proteomic_mri_mprage.csv    # Final matched dataset
+AD_CN_MRI_final/           # Organized MRI images for matched subjects
+```
