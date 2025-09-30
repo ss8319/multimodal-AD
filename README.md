@@ -1,5 +1,6 @@
 # Imaging Proteomics and Genomics Integration
 *In-progress -- this repo is under active development*
+Our goal is to train multimodal classifcation method that leverages protein and MRI data to classify Alzheimer's disease and to leverage existing XAI work to understand the interactions between imaging biomarkers and protein biomarkers. 
 
 ## Installation
 Clone the repo, install [uv](https://docs.astral.sh/uv/getting-started/installation/), and run
