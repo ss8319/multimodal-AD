@@ -26,9 +26,11 @@ def main(args):
         random_state=args.random_state
     )
     
-    X_train, y_train, X_test, y_test, train_df = data_loader.get_train_test_split(
+    # Get raw (unscaled) features for proper per-fold preprocessing
+    X_train_raw, y_train, X_test, y_test, train_df = data_loader.get_train_test_split(
         train_path=args.train_data,
-        test_path=args.test_data
+        test_path=args.test_data,
+        return_raw=True  # Return raw features for per-fold scaling
     )
 
     # ==================================================
@@ -48,7 +50,7 @@ def main(args):
     cv_splits_path = data_folder / "cv_fold_indices.csv"
     
     fold_df = save_cv_fold_indices(
-        X=X_train,
+        X=X_train_raw,
         y=y_train,
         df=train_df,
         cv_splitter=cv_splitter,
@@ -57,7 +59,8 @@ def main(args):
     )
     
     print(f"   • Number of folds: {args.n_folds}")
-    print(f"   • Samples per fold: ~{len(X_train) // args.n_folds}")
+    print(f"   • Samples per fold: ~{len(X_train_raw) // args.n_folds}")
+    print(f"   ⚠️  Per-fold preprocessing enabled: Each fold will fit its own scaler")
     
     # # ==================================================
     # # 3. MODEL EVALUATION
@@ -78,13 +81,14 @@ def main(args):
             # Evaluate model with CV and optional test set
             result = evaluate_model_cv(
                 clf=clf,
-                X_train=X_train,
+                X_train_raw=X_train_raw,  # Pass raw features
                 y_train=y_train,
                 X_test=X_test,
                 y_test=y_test,
                 cv_splitter=cv_splitter,
                 clf_name=clf_name,
-                compute_test_confusion=args.show_confusion
+                compute_test_confusion=args.show_confusion,
+                data_loader=data_loader  # Enable per-fold preprocessing
             )
 
             results.append(result)

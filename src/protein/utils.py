@@ -77,19 +77,20 @@ def compute_confusion_metrics(y_true, y_pred):
     }
 
 
-def evaluate_model_cv(clf, X_train, y_train, X_test, y_test, cv_splitter, clf_name="Model", compute_test_confusion=False):
+def evaluate_model_cv(clf, X_train_raw, y_train, X_test, y_test, cv_splitter, clf_name="Model", compute_test_confusion=False, data_loader=None):
     """
     Evaluate a classifier using cross-validation and optional test set
     
     Args:
         clf: sklearn-compatible classifier
-        X_train: Training features
+        X_train_raw: Raw training features (UNSCALED) - if None, assumes X_train is pre-scaled
         y_train: Training labels
         X_test: Test features (can be None)
         y_test: Test labels (can be None)
         cv_splitter: sklearn CV splitter
         clf_name: Name of classifier for logging
         compute_test_confusion: If True, compute confusion matrix on test set
+        data_loader: ProteinDataLoader instance for per-fold preprocessing (if X_train_raw is DataFrame)
     
     Returns:
         dict with CV and test metrics
@@ -100,23 +101,50 @@ def evaluate_model_cv(clf, X_train, y_train, X_test, y_test, cv_splitter, clf_na
     test_acc_scores = []
     
     test_available = X_test is not None and y_test is not None
+    use_per_fold_preprocessing = data_loader is not None and hasattr(X_train_raw, 'columns')
     
-    for fold_idx, (train_idx, val_idx) in enumerate(cv_splitter.split(X_train, y_train)):
+    for fold_idx, (train_idx, val_idx) in enumerate(cv_splitter.split(X_train_raw if use_per_fold_preprocessing else X_train_raw, y_train)):
         try:
+            # === PER-FOLD PREPROCESSING (if enabled) ===
+            if use_per_fold_preprocessing:
+                # Create a fresh loader for this fold
+                from sklearn.preprocessing import StandardScaler
+                fold_scaler = StandardScaler()
+                
+                # Get raw data for this fold
+                X_train_fold_raw = X_train_raw.iloc[train_idx]
+                X_val_fold_raw = X_train_raw.iloc[val_idx]
+                
+                # Fit scaler ONLY on training fold
+                fold_scaler.fit(X_train_fold_raw)
+                
+                # Transform both training and validation folds
+                X_train_fold = fold_scaler.transform(X_train_fold_raw)
+                X_val_fold = fold_scaler.transform(X_val_fold_raw)
+                
+                y_train_fold = y_train[train_idx]
+                y_val_fold = y_train[val_idx]
+            else:
+                # Use pre-scaled data (backward compatibility)
+                X_train_fold = X_train_raw[train_idx]
+                X_val_fold = X_train_raw[val_idx]
+                y_train_fold = y_train[train_idx]
+                y_val_fold = y_train[val_idx]
+            
             # Clone and train model on fold
             fold_clf = clone(clf)
-            fold_clf.fit(X_train[train_idx], y_train[train_idx])
+            fold_clf.fit(X_train_fold, y_train_fold)
             
             # === CV Validation Evaluation ===
-            val_pred = fold_clf.predict(X_train[val_idx])
-            cv_acc = accuracy_score(y_train[val_idx], val_pred)
+            val_pred = fold_clf.predict(X_val_fold)
+            cv_acc = accuracy_score(y_val_fold, val_pred)
             cv_acc_scores.append(cv_acc)
             
             # Compute AUC if probabilities available
             if hasattr(fold_clf, 'predict_proba'):
-                val_proba = fold_clf.predict_proba(X_train[val_idx])
+                val_proba = fold_clf.predict_proba(X_val_fold)
                 if val_proba is not None and not np.isnan(val_proba).any():
-                    cv_auc = roc_auc_score(y_train[val_idx], val_proba[:, 1])
+                    cv_auc = roc_auc_score(y_val_fold, val_proba[:, 1])
                     cv_auc_scores.append(cv_auc)
                 else:
                     cv_auc_scores.append(np.nan)
@@ -177,7 +205,16 @@ def evaluate_model_cv(clf, X_train, y_train, X_test, y_test, cv_splitter, clf_na
         if compute_test_confusion:
             # Train on full training set for final test evaluation
             final_clf = clone(clf)
-            final_clf.fit(X_train, y_train)
+            
+            if use_per_fold_preprocessing:
+                # Need to scale the full training set before fitting
+                from sklearn.preprocessing import StandardScaler
+                final_scaler = StandardScaler()
+                X_train_scaled = final_scaler.fit_transform(X_train_raw)
+                final_clf.fit(X_train_scaled, y_train)
+            else:
+                final_clf.fit(X_train_raw, y_train)
+            
             test_pred_final = final_clf.predict(X_test)
             confusion_metrics = compute_confusion_metrics(y_test, test_pred_final)
             results.update(confusion_metrics)
