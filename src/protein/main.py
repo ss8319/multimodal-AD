@@ -8,7 +8,10 @@ from sklearn.model_selection import StratifiedKFold
 
 from dataset import ProteinDataLoader
 from model import get_classifiers
-from utils import save_cv_fold_indices, evaluate_model_cv, print_results_summary, save_results
+from utils import (
+    save_cv_fold_indices, evaluate_model_cv, print_results_summary, 
+    save_results, create_run_directory, save_all_models
+)
 
 
 def main(args):
@@ -62,9 +65,9 @@ def main(args):
     print(f"   • Samples per fold: ~{len(X_train_raw) // args.n_folds}")
     print(f"   ⚠️  Per-fold preprocessing enabled: Each fold will fit its own scaler")
     
-    # # ==================================================
-    # # 3. MODEL EVALUATION
-    # # ==================================================
+    # ==================================================
+    # 3. MODEL EVALUATION
+    # ==================================================
     print(f"\n🤖 EVALUATING CLASSIFIERS")
     print("-" * 70)
     
@@ -97,7 +100,7 @@ def main(args):
             # Print results
             print(f"   ✅ CV-AUC: {result['cv_auc_mean']:.3f} ± {result['cv_auc_std']:.3f}")
             print(f"   ✅ CV-Acc: {result['cv_acc_mean']:.3f} ± {result['cv_acc_std']:.3f}")
-
+            
             if test_available:
                 print(f"   🎯 Test-AUC: {result['test_auc_mean']:.3f} ± {result['test_auc_std']:.3f}")
                 print(f"   🎯 Test-Acc: {result['test_acc_mean']:.3f} ± {result['test_acc_std']:.3f}")
@@ -118,12 +121,33 @@ def main(args):
     print(f"\n💾 SAVING RESULTS")
     print("-" * 70)
     
+    # Always save results to data folder
     save_results(detailed_results, data_folder)
-    
-    # Save summary table
     results_csv_path = data_folder / "classifier_results_summary.csv"
     results_df.to_csv(results_csv_path, index=False)
     print(f"💾 Saved results summary to: {results_csv_path}")
+    
+    # ==================================================
+    # 6. SAVE TRAINED MODELS (if requested)
+    # ==================================================
+    if args.save_models:
+        run_dir = create_run_directory()
+        
+        # Train and save all models on full training set
+        use_per_fold_preprocessing = data_loader is not None
+        save_all_models(
+            classifiers=classifiers,
+            results_df=results_df,
+            X_train_raw=X_train_raw,
+            y_train=y_train,
+            use_per_fold_preprocessing=use_per_fold_preprocessing,
+            run_dir=run_dir
+        )
+        
+        # Also copy results to run directory
+        import shutil
+        shutil.copy(results_csv_path, run_dir / "results_summary.csv")
+        print(f"   📄 Copied results to: {run_dir / 'results_summary.csv'}")
     
     print("\n✅ EXPERIMENT COMPLETE!")
     print("=" * 70)
@@ -177,6 +201,11 @@ if __name__ == "__main__":
         "--show-confusion",
         action="store_true",
         help="Show detailed confusion matrix for best model on test set"
+    )
+    parser.add_argument(
+        "--save-models",
+        action="store_true",
+        help="Train and save all models on full training set to timestamped run directory"
     )
     
     args = parser.parse_args()

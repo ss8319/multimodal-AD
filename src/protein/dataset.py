@@ -40,7 +40,7 @@ class ProteinDataLoader:
     def load_data(self):
         """Load protein data from CSV"""
         df = pd.read_csv(self.data_path)
-        print(f"📂 Loaded {len(df)} samples from {self.data_path.name}")
+        print(f"[DATA] Loaded {len(df)} samples from {self.data_path.name}")
         return df
     
     def prepare_features(self, df, fit=True):

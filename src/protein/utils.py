@@ -4,10 +4,14 @@ Utility functions for model evaluation and cross-validation
 import numpy as np
 import pandas as pd
 import pickle
+import torch
+import json
+from datetime import datetime
 from pathlib import Path
 from sklearn.model_selection import StratifiedKFold
 from sklearn.base import clone
 from sklearn.metrics import accuracy_score, roc_auc_score, confusion_matrix
+from sklearn.preprocessing import StandardScaler
 
 
 def save_cv_fold_indices(X, y, df, cv_splitter, output_path, id_col='RID'):
@@ -77,6 +81,80 @@ def compute_confusion_metrics(y_true, y_pred):
     }
 
 
+def preprocess_fold(X_train_raw, X_val_raw, train_idx, val_idx, use_per_fold_preprocessing):
+    """
+    Preprocess a single CV fold with per-fold scaling
+    
+    Args:
+        X_train_raw: Raw training features (DataFrame or array)
+        X_val_raw: Raw validation features (unused if extracting from X_train_raw)
+        train_idx: Training indices for this fold
+        val_idx: Validation indices for this fold
+        use_per_fold_preprocessing: Whether to use per-fold preprocessing
+        
+    Returns:
+        X_train_fold, X_val_fold, y_train_fold, y_val_fold
+    """
+    if use_per_fold_preprocessing:
+        fold_scaler = StandardScaler()
+        X_train_fold_raw = X_train_raw.iloc[train_idx]
+        X_val_fold_raw = X_train_raw.iloc[val_idx]
+        
+        fold_scaler.fit(X_train_fold_raw)
+        X_train_fold = fold_scaler.transform(X_train_fold_raw)
+        X_val_fold = fold_scaler.transform(X_val_fold_raw)
+    else:
+        X_train_fold = X_train_raw[train_idx]
+        X_val_fold = X_train_raw[val_idx]
+    
+    return X_train_fold, X_val_fold
+
+
+def evaluate_fold(fold_clf, X_train_fold, y_train_fold, X_val_fold, y_val_fold, X_test, y_test):
+    """
+    Evaluate a single fold on validation and optional test set
+    
+    Args:
+        fold_clf: Trained classifier for this fold
+        X_train_fold: Training features for this fold
+        y_train_fold: Training labels for this fold
+        X_val_fold: Validation features for this fold
+        y_val_fold: Validation labels for this fold
+        X_test: Test features (can be None)
+        y_test: Test labels (can be None)
+        
+    Returns:
+        dict with cv_auc, cv_acc, test_auc, test_acc (test metrics are None if no test set)
+    """
+    # Validation metrics
+    val_pred = fold_clf.predict(X_val_fold)
+    cv_acc = accuracy_score(y_val_fold, val_pred)
+    
+    cv_auc = np.nan
+    if hasattr(fold_clf, 'predict_proba'):
+        val_proba = fold_clf.predict_proba(X_val_fold)
+        if val_proba is not None and not np.isnan(val_proba).any():
+            cv_auc = roc_auc_score(y_val_fold, val_proba[:, 1])
+    
+    # Test metrics (if available)
+    test_acc, test_auc = np.nan, np.nan
+    if X_test is not None and y_test is not None:
+        test_pred = fold_clf.predict(X_test)
+        test_acc = accuracy_score(y_test, test_pred)
+        
+        if hasattr(fold_clf, 'predict_proba'):
+            test_proba = fold_clf.predict_proba(X_test)
+            if test_proba is not None and not np.isnan(test_proba).any():
+                test_auc = roc_auc_score(y_test, test_proba[:, 1])
+    
+    return {
+        'cv_auc': cv_auc,
+        'cv_acc': cv_acc,
+        'test_auc': test_auc,
+        'test_acc': test_acc
+    }
+
+
 def evaluate_model_cv(clf, X_train_raw, y_train, X_test, y_test, cv_splitter, clf_name="Model", compute_test_confusion=False, data_loader=None):
     """
     Evaluate a classifier using cross-validation and optional test set
@@ -103,69 +181,32 @@ def evaluate_model_cv(clf, X_train_raw, y_train, X_test, y_test, cv_splitter, cl
     test_available = X_test is not None and y_test is not None
     use_per_fold_preprocessing = data_loader is not None and hasattr(X_train_raw, 'columns')
     
-    for fold_idx, (train_idx, val_idx) in enumerate(cv_splitter.split(X_train_raw if use_per_fold_preprocessing else X_train_raw, y_train)):
+    # === CROSS-VALIDATION LOOP ===
+    for fold_idx, (train_idx, val_idx) in enumerate(cv_splitter.split(X_train_raw, y_train)):
         try:
-            # === PER-FOLD PREPROCESSING (if enabled) ===
-            if use_per_fold_preprocessing:
-                # Create a fresh loader for this fold
-                from sklearn.preprocessing import StandardScaler
-                fold_scaler = StandardScaler()
-                
-                # Get raw data for this fold
-                X_train_fold_raw = X_train_raw.iloc[train_idx]
-                X_val_fold_raw = X_train_raw.iloc[val_idx]
-                
-                # Fit scaler ONLY on training fold
-                fold_scaler.fit(X_train_fold_raw)
-                
-                # Transform both training and validation folds
-                X_train_fold = fold_scaler.transform(X_train_fold_raw)
-                X_val_fold = fold_scaler.transform(X_val_fold_raw)
-                
-                y_train_fold = y_train[train_idx]
-                y_val_fold = y_train[val_idx]
-            else:
-                # Use pre-scaled data (backward compatibility)
-                X_train_fold = X_train_raw[train_idx]
-                X_val_fold = X_train_raw[val_idx]
-                y_train_fold = y_train[train_idx]
-                y_val_fold = y_train[val_idx]
+            # Preprocess fold
+            X_train_fold, X_val_fold = preprocess_fold(
+                X_train_raw, None, train_idx, val_idx, use_per_fold_preprocessing
+            )
+            y_train_fold = y_train[train_idx]
+            y_val_fold = y_train[val_idx]
             
-            # Clone and train model on fold
+            # Train model on fold
             fold_clf = clone(clf)
             fold_clf.fit(X_train_fold, y_train_fold)
             
-            # === CV Validation Evaluation ===
-            val_pred = fold_clf.predict(X_val_fold)
-            cv_acc = accuracy_score(y_val_fold, val_pred)
-            cv_acc_scores.append(cv_acc)
+            # Evaluate fold
+            fold_metrics = evaluate_fold(
+                fold_clf, X_train_fold, y_train_fold,
+                X_val_fold, y_val_fold, X_test, y_test
+            )
             
-            # Compute AUC if probabilities available
-            if hasattr(fold_clf, 'predict_proba'):
-                val_proba = fold_clf.predict_proba(X_val_fold)
-                if val_proba is not None and not np.isnan(val_proba).any():
-                    cv_auc = roc_auc_score(y_val_fold, val_proba[:, 1])
-                    cv_auc_scores.append(cv_auc)
-                else:
-                    cv_auc_scores.append(np.nan)
-            else:
-                cv_auc_scores.append(np.nan)
-            
-            # === Test Set Evaluation ===
+            # Collect metrics
+            cv_auc_scores.append(fold_metrics['cv_auc'])
+            cv_acc_scores.append(fold_metrics['cv_acc'])
             if test_available:
-                test_pred = fold_clf.predict(X_test)
-                test_acc = accuracy_score(y_test, test_pred)
-                test_acc_scores.append(test_acc)
-                
-                if hasattr(fold_clf, 'predict_proba'):
-                    test_proba = fold_clf.predict_proba(X_test)
-                    if test_proba is not None and not np.isnan(test_proba).any():
-                        test_auc = roc_auc_score(y_test, test_proba[:, 1])
-                        test_auc_scores.append(test_auc)
-                    else:
-                        test_auc_scores.append(np.nan)
-                else:
-                    test_auc_scores.append(np.nan)
+                test_auc_scores.append(fold_metrics['test_auc'])
+                test_acc_scores.append(fold_metrics['test_acc'])
             
         except Exception as e:
             print(f"   ⚠️  Fold {fold_idx + 1} failed: {str(e)[:50]}")
@@ -203,23 +244,38 @@ def evaluate_model_cv(clf, X_train_raw, y_train, X_test, y_test, cv_splitter, cl
         
         # Optionally compute confusion matrix on full test set
         if compute_test_confusion:
-            # Train on full training set for final test evaluation
-            final_clf = clone(clf)
-            
-            if use_per_fold_preprocessing:
-                # Need to scale the full training set before fitting
-                from sklearn.preprocessing import StandardScaler
-                final_scaler = StandardScaler()
-                X_train_scaled = final_scaler.fit_transform(X_train_raw)
-                final_clf.fit(X_train_scaled, y_train)
-            else:
-                final_clf.fit(X_train_raw, y_train)
-            
+            final_clf = train_final_model(clf, X_train_raw, y_train, use_per_fold_preprocessing)
             test_pred_final = final_clf.predict(X_test)
             confusion_metrics = compute_confusion_metrics(y_test, test_pred_final)
             results.update(confusion_metrics)
     
     return results
+
+
+def train_final_model(clf, X_train_raw, y_train, use_per_fold_preprocessing):
+    """
+    Train a model on the full training set (after CV)
+    
+    Args:
+        clf: sklearn-compatible classifier
+        X_train_raw: Raw training features
+        y_train: Training labels
+        use_per_fold_preprocessing: Whether to scale features
+        
+    Returns:
+        Trained classifier
+    """
+    final_clf = clone(clf)
+    
+    if use_per_fold_preprocessing:
+        # Scale the full training set
+        final_scaler = StandardScaler()
+        X_train_scaled = final_scaler.fit_transform(X_train_raw)
+        final_clf.fit(X_train_scaled, y_train)
+    else:
+        final_clf.fit(X_train_raw, y_train)
+    
+    return final_clf
 
 
 def print_results_summary(results_df, test_available=False, show_confusion=False):
@@ -289,3 +345,103 @@ def save_results(results_dict, output_dir):
     with open(output_path, 'wb') as f:
         pickle.dump(results_dict, f)
     print(f"💾 Saved detailed results to: {output_path}")
+
+
+def create_run_directory():
+    """
+    Create a timestamped directory for this run
+    
+    Returns:
+        Path to the run directory
+    """
+    runs_dir = Path("src/protein/runs")
+    runs_dir.mkdir(parents=True, exist_ok=True)
+    
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    run_dir = runs_dir / f"run_{timestamp}"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    
+    print(f"📁 Created run directory: {run_dir}")
+    return run_dir
+
+
+def save_model(model, model_name, run_dir):
+    """
+    Save a trained model to disk
+    
+    Args:
+        model: Trained model (sklearn or PyTorch wrapper)
+        model_name: Name of the model
+        run_dir: Directory to save the model
+    """
+    model_dir = Path(run_dir) / "models"
+    model_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Check if it's a PyTorch model
+    is_pytorch = hasattr(model, 'model') and hasattr(model.model, 'state_dict')
+    
+    if is_pytorch:
+        # Save PyTorch model state dict
+        model_path = model_dir / f"{model_name}.pth"
+        torch.save({
+            'model_state_dict': model.model.state_dict(),
+            'model_config': {
+                'd_model': model.d_model,
+                'n_heads': model.n_heads,
+                'n_layers': model.n_layers,
+                'dropout': model.dropout,
+                'n_features': model.model.n_features
+            }
+        }, model_path)
+        print(f"   💾 Saved PyTorch model: {model_path.name}")
+    else:
+        # Save sklearn model with pickle
+        model_path = model_dir / f"{model_name}.pkl"
+        with open(model_path, 'wb') as f:
+            pickle.dump(model, f)
+        print(f"   💾 Saved sklearn model: {model_path.name}")
+
+
+def save_all_models(classifiers, results_df, X_train_raw, y_train, use_per_fold_preprocessing, run_dir):
+    """
+    Train and save all classifiers on full training set
+    
+    Args:
+        classifiers: Dict of classifier name -> classifier instance
+        results_df: DataFrame with CV results
+        X_train_raw: Raw training features
+        y_train: Training labels
+        use_per_fold_preprocessing: Whether to use scaling
+        run_dir: Directory to save models
+    """
+    print(f"\n💾 TRAINING AND SAVING FINAL MODELS")
+    print("-" * 70)
+    
+    for clf_name, clf in classifiers.items():
+        try:
+            # Train on full training set
+            final_model = train_final_model(clf, X_train_raw, y_train, use_per_fold_preprocessing)
+            
+            # Save model
+            # Sanitize filename
+            safe_name = clf_name.replace(" ", "_").replace("(", "").replace(")", "").lower()
+            save_model(final_model, safe_name, run_dir)
+            
+        except Exception as e:
+            print(f"   ⚠️  Failed to save {clf_name}: {str(e)[:50]}")
+    
+    # Save metadata
+    metadata = {
+        'timestamp': datetime.now().isoformat(),
+        'n_models': len(classifiers),
+        'model_names': list(classifiers.keys()),
+        'best_model': results_df.sort_values('cv_auc_mean', ascending=False).iloc[0]['classifier'],
+        'best_cv_auc': results_df.sort_values('cv_auc_mean', ascending=False).iloc[0]['cv_auc_mean']
+    }
+    
+    metadata_path = Path(run_dir) / "metadata.json"
+    with open(metadata_path, 'w') as f:
+        json.dump(metadata, f, indent=2)
+    print(f"   📄 Saved metadata: {metadata_path.name}")
+    
+    print(f"\n✅ All models saved to: {run_dir / 'models'}")
