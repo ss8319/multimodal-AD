@@ -24,10 +24,12 @@ class ProteinTransformer(nn.Module):
     """Simple Transformer for protein classification using self-attention"""
     def __init__(self, n_features, d_model=64, n_heads=4, n_layers=2, dropout=0.1):
         super().__init__()
-        self.d_model = d_model
-        self.n_features = n_features
+        self.d_model = d_model # The dimensionality of the internal attention and hidden layers
+        self.n_features = n_features # number of protein features in the input data
         
         # Input projection
+        #A linear layer to map the raw input feature size (n_features) into the 
+        # required embedding dimension for the Transformer (d_model)
         self.input_projection = nn.Linear(n_features, d_model)
         
         # Positional encoding for protein features
@@ -41,6 +43,7 @@ class ProteinTransformer(nn.Module):
             dropout=dropout,
             batch_first=True
         )
+        #Stacks the encoder layers on top of each other to form the encoder
         self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=n_layers)
         
         # Classification head
@@ -249,7 +252,7 @@ def get_classifiers(random_state=42):
         'Neural Network': MLPClassifier(hidden_layer_sizes=(100, 50), random_state=random_state, max_iter=1000),
         'Protein Transformer': ProteinTransformerClassifier(
             d_model=32, n_heads=2, n_layers=1, dropout=0.2,
-            lr=0.01, epochs=50, batch_size=8, patience=5, random_state=random_state
+            lr=0.01, epochs=30, batch_size=16, patience=5, random_state=random_state
         )
     }
     return classifiers

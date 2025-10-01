@@ -32,7 +32,7 @@ class ProteinDataLoader:
         self.random_state = random_state
         
         # Initialize preprocessing objects
-        self.scaler = StandardScaler()
+        self.scaler = StandardScaler() # See docs: https://scikit-learn.org/stable/modules/generated/sklearn.preprocessing.StandardScaler.html
         self.label_encoder = LabelEncoder()
         self.zero_var_cols = []
         self.feature_cols = []
