@@ -93,35 +93,6 @@ for name, clf in classifiers.items():
     clf.fit(X_train, y_train)
     predictions = clf.predict(X_test)
 ```
-
-### `utils.py` - Evaluation Utilities
-
-**Functions:**
-- `save_cv_fold_indices()`: Save CV splits for reproducibility
-- `evaluate_model_cv()`: Full CV evaluation with optional test set
-- `print_results_summary()`: Formatted results display
-- `save_results()`: Persist results to pickle
-
-**Usage:**
-```python
-from utils import evaluate_model_cv
-from sklearn.model_selection import StratifiedKFold
-
-cv_splitter = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
-
-results = evaluate_model_cv(
-    clf=my_classifier,
-    X_train=X_train,
-    y_train=y_train,
-    X_test=X_test,
-    y_test=y_test,
-    cv_splitter=cv_splitter,
-    clf_name="My Model"
-)
-
-print(f"CV AUC: {results['cv_auc_mean']:.3f} ± {results['cv_auc_std']:.3f}")
-```
-
 ### `main.py` - Experiment Orchestration
 
 Clean workflow:
@@ -138,30 +109,6 @@ The experiment generates:
 - `cv_fold_indices.csv`: CV fold assignments (RID, fold, split_type)
 - `cv_fold_detailed_results.pkl`: Per-fold metrics for each classifier
 - `classifier_results_summary.csv`: Summary table with mean±std for all models
-
-
-### Use Individual Components
-
-```python
-# Just data loading
-from dataset import ProteinDataLoader
-loader = ProteinDataLoader("data.csv")
-X, y = loader.prepare_features(df, fit=True)
-
-# Just model evaluation
-from utils import evaluate_model_cv
-from model import get_classifiers
-
-clf = get_classifiers()['Random Forest']
-results = evaluate_model_cv(clf, X_train, y_train, None, None, cv_splitter)
-
-# Custom model
-from sklearn.linear_model import Ridge
-from utils import evaluate_model_cv
-
-my_model = Ridge(alpha=1.0)
-results = evaluate_model_cv(my_model, X_train, y_train, X_test, y_test, cv_splitter)
-```
 
 ### Reproducibility
 
