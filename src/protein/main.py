@@ -41,14 +41,14 @@ def main(args):
     )
     
     data_folder = Path(args.train_data).parent
-    cv_splits_path = data_folder / "cv_fold_indices.csv"
-    
+
+    # Generate fold_df here, but save it later if --save-models is true
     fold_df = save_cv_fold_indices(
         X=X_train_raw,
         y=y_train,
         df=train_df,
         cv_splitter=cv_splitter,
-        output_path=cv_splits_path,
+        output_path=data_folder / "temp_cv_fold_indices.csv",  # Save temporarily, will be moved
         id_col=args.id_col
     )
     
@@ -98,13 +98,22 @@ def main(args):
     print(f"\nSAVING RESULTS")
     print("-" * 70)
     
-    save_results(detailed_results, data_folder)
-    results_csv_path = data_folder / "classifier_results_summary.csv"
-    results_df.to_csv(results_csv_path, index=False)
-    print(f"Saved results summary to: {results_csv_path}")
-    
     if args.save_models:
+        # Save everything to run directory (centralized)
         run_dir = create_run_directory()
+        
+        # Save CV fold indices to run directory
+        cv_splits_run_path = run_dir / "cv_fold_indices.csv"
+        fold_df.to_csv(cv_splits_run_path, index=False)
+        print(f"Saved CV fold indices to: {cv_splits_run_path}")
+        
+        # Save results to run directory
+        save_results(detailed_results, run_dir)
+        results_csv_path = run_dir / "cv_results_summary.csv"
+        results_df.to_csv(results_csv_path, index=False)
+        print(f"Saved CV results summary to: {results_csv_path}")
+        
+        # Save models and final test results
         save_all_models(
             classifiers=classifiers,
             results_df=results_df,
@@ -114,9 +123,12 @@ def main(args):
             y_test=y_test,
             run_dir=run_dir
         )
-        import shutil
-        shutil.copy(results_csv_path, run_dir / "results_summary.csv")
-        print(f"   Copied results to: {run_dir / 'results_summary.csv'}")
+    else:
+        # Fallback: save to data folder for quick runs without models
+        save_results(detailed_results, data_folder)
+        results_csv_path = data_folder / "classifier_results_summary.csv"
+        results_df.to_csv(results_csv_path, index=False)
+        print(f"Saved results summary to: {results_csv_path}")
     
     print("\nEXPERIMENT COMPLETE!")
     print("=" * 70)

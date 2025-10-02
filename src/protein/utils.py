@@ -5,7 +5,6 @@ import numpy as np
 import pandas as pd
 import pickle
 import torch
-import json
 from datetime import datetime
 from pathlib import Path
 from sklearn.model_selection import StratifiedKFold
@@ -225,15 +224,15 @@ def print_results_summary(results_df, test_available=False):
 
 def save_results(results_dict, output_dir):
     """
-    Save evaluation results to pickle file
+    Save detailed CV evaluation results to pickle file
     Args:
-        results_dict: Dictionary of results
+        results_dict: Dictionary of detailed CV results
         output_dir: Directory to save results
     """
-    output_path = Path(output_dir) / "cv_fold_detailed_results.pkl"
+    output_path = Path(output_dir) / "cv_detailed_results.pkl"
     with open(output_path, 'wb') as f:
         pickle.dump(results_dict, f)
-    print(f"Saved detailed results to: {output_path}")
+    print(f"Saved detailed CV results to: {output_path}")
 
 def create_run_directory():
     """
@@ -339,40 +338,15 @@ def save_all_models(classifiers, results_df, X_train_raw, y_train, X_test, y_tes
         except Exception as e:
             print(f"   Failed to save {clf_name}: {str(e)[:50]}")
    
-    # Save metadata
-    metadata = {
-        'timestamp': datetime.now().isoformat(),
-        'n_models': len(classifiers),
-        'model_names': list(classifiers.keys()),
-        'n_train_samples': len(X_train_raw),
-        'n_test_samples': len(X_test) if test_available else 0,
-        'n_features': X_train_raw.shape[1] if hasattr(X_train_raw, 'shape') else len(X_train_raw[0]),
-        'preprocessing_pipeline': [
-            '1. Identify features (exclude metadata)',
-            '2. Impute missing values (median)',
-            '3. Remove zero-variance features',
-            '4. Encode labels (AD=1, CN=0)',
-            '5. Scale features (StandardScaler on full train set)'
-        ],
-        'label_encoding': 'AD=1, CN=0'
-    }
-
-    if len(results_df) > 0:
-        best_row = results_df.sort_values('cv_auc_mean', ascending=False).iloc[0]
-        metadata['best_model_cv'] = best_row['classifier']
-        metadata['best_cv_auc'] = float(best_row['cv_auc_mean'])
-    
-    # Add final test results if available
+    # Save final test results as simple CSV (no redundant metadata.json)
     if final_test_results:
-        metadata['final_test_results'] = final_test_results
-        # Find best model by final test AUC
+        final_results_df = pd.DataFrame(final_test_results)
+        final_results_path = Path(run_dir) / "final_test_results.csv"
+        final_results_df.to_csv(final_results_path, index=False)
+        print(f"\n   Saved final test results: {final_results_path.name}")
+        
+        # Show best final model
         best_test = max(final_test_results, key=lambda x: x.get('test_auc', 0))
-        metadata['best_model_test'] = best_test['model']
-        metadata['best_test_auc'] = best_test.get('test_auc', None)
-    
-    metadata_path = Path(run_dir) / "metadata.json"
-    with open(metadata_path, 'w') as f:
-        json.dump(metadata, f, indent=2)
-    print(f"\n   Saved metadata: {metadata_path.name}")
+        print(f"   Best final model: {best_test['model']} (AUC: {best_test.get('test_auc', 'N/A'):.3f})")
     
     print(f"\nAll models saved to: {run_dir / 'models'}")
