@@ -53,9 +53,9 @@ def main(args):
         id_col=args.id_col
     )
     
-    print(f"   ΓÇó Number of folds: {args.n_folds}")
-    print(f"   ΓÇó Samples per fold: ~{len(X_train_raw) // args.n_folds}")
-    print(f"   ΓÇó Per-fold preprocessing enabled: Each fold will fit its own scaler")
+    print(f"   Number of folds: {args.n_folds}")
+    print(f"   Samples per fold: ~{len(X_train_raw) // args.n_folds}")
+    print(f"   Per-fold preprocessing enabled: Each fold will fit its own scaler")
     
     print(f"\nEVALUATING CLASSIFIERS")
     print("-" * 70)
@@ -84,12 +84,12 @@ def main(args):
             results.append(result)
             detailed_results[clf_name] = result
 
-            print(f"     CV-AUC: {result['cv_auc_mean']:.3f} ┬▒ {result['cv_auc_std']:.3f}")
-            print(f"     CV-Acc: {result['cv_acc_mean']:.3f} ┬▒ {result['cv_acc_std']:.3f}")
+            print(f"     CV-AUC: {result['cv_auc_mean']:.3f} ± {result['cv_auc_std']:.3f}")
+            print(f"     CV-Acc: {result['cv_acc_mean']:.3f} ± {result['cv_acc_std']:.3f}")
             
             if test_available:
-                print(f"     Test-AUC: {result['test_auc_mean']:.3f} ┬▒ {result['test_auc_std']:.3f}")
-                print(f"     Test-Acc: {result['test_acc_mean']:.3f} ┬▒ {result['test_acc_std']:.3f}")
+                print(f"     Test-AUC: {result['test_auc_mean']:.3f} ± {result['test_auc_std']:.3f}")
+                print(f"     Test-Acc: {result['test_acc_mean']:.3f} ± {result['test_acc_std']:.3f}")
 
         except Exception as e:
             print(f"     Error: {str(e)[:50]}...")
