@@ -282,7 +282,7 @@ def save_model(model, model_name, run_dir):
             pickle.dump(model, f)
         print(f"   Saved sklearn model: {model_path.name}")
 
-def save_all_models(classifiers, results_df, X_train_raw, y_train, run_dir):
+def save_all_models(classifiers, results_df, X_train_raw, y_train, X_test, y_test, run_dir):
     """
     Train and save all classifiers on full training set
     Args:
@@ -290,11 +290,16 @@ def save_all_models(classifiers, results_df, X_train_raw, y_train, run_dir):
         results_df: DataFrame with CV results
         X_train_raw: DataFrame with preprocessed features (NOT scaled)
         y_train: Encoded training labels (AD=1, CN=0)
+        X_test: Test features (can be None)
+        y_test: Test labels (can be None)
         run_dir: Directory to save models
     """
     print(f"\nTRAINING AND SAVING FINAL MODELS")
     print("-" * 70)
     print(f"   Training on FULL training set ({len(X_train_raw)} samples)")
+    
+    test_available = X_test is not None and y_test is not None
+    final_test_results = []
     
     for clf_name, clf in classifiers.items():
         try:
@@ -304,7 +309,29 @@ def save_all_models(classifiers, results_df, X_train_raw, y_train, run_dir):
             final_clf = clone(clf)
             scaler = StandardScaler()
             X_train_scaled = scaler.fit_transform(X_train_raw)
-            final_clf.fit(X_train_scaled, y_train)
+            final_clf.fit(np.asarray(X_train_scaled), y_train)
+
+            # Evaluate on test set if available
+            test_metrics = {}
+            if test_available:
+                X_test_scaled = scaler.transform(X_test)
+                test_pred = final_clf.predict(np.asarray(X_test_scaled))
+                test_acc = accuracy_score(y_test, test_pred)
+                test_metrics['test_accuracy'] = float(test_acc)
+                
+                if hasattr(final_clf, 'predict_proba'):
+                    test_proba = final_clf.predict_proba(np.asarray(X_test_scaled))
+                    if test_proba is not None and not np.isnan(test_proba).any():
+                        test_auc = roc_auc_score(y_test, test_proba[:, 1])
+                        test_metrics['test_auc'] = float(test_auc)
+                
+                print(f"      Test AUC: {test_metrics.get('test_auc', 'N/A'):.3f}" if 'test_auc' in test_metrics else "      Test AUC: N/A")
+                print(f"      Test Accuracy: {test_metrics['test_accuracy']:.3f}")
+                
+                final_test_results.append({
+                    'model': clf_name,
+                    **test_metrics
+                })
 
             # Save model
             safe_name = clf_name.replace(" ", "_").replace("(", "").replace(")", "").lower()
@@ -318,6 +345,7 @@ def save_all_models(classifiers, results_df, X_train_raw, y_train, run_dir):
         'n_models': len(classifiers),
         'model_names': list(classifiers.keys()),
         'n_train_samples': len(X_train_raw),
+        'n_test_samples': len(X_test) if test_available else 0,
         'n_features': X_train_raw.shape[1] if hasattr(X_train_raw, 'shape') else len(X_train_raw[0]),
         'preprocessing_pipeline': [
             '1. Identify features (exclude metadata)',
@@ -331,8 +359,16 @@ def save_all_models(classifiers, results_df, X_train_raw, y_train, run_dir):
 
     if len(results_df) > 0:
         best_row = results_df.sort_values('cv_auc_mean', ascending=False).iloc[0]
-        metadata['best_model'] = best_row['classifier']
+        metadata['best_model_cv'] = best_row['classifier']
         metadata['best_cv_auc'] = float(best_row['cv_auc_mean'])
+    
+    # Add final test results if available
+    if final_test_results:
+        metadata['final_test_results'] = final_test_results
+        # Find best model by final test AUC
+        best_test = max(final_test_results, key=lambda x: x.get('test_auc', 0))
+        metadata['best_model_test'] = best_test['model']
+        metadata['best_test_auc'] = best_test.get('test_auc', None)
     
     metadata_path = Path(run_dir) / "metadata.json"
     with open(metadata_path, 'w') as f:

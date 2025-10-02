@@ -110,6 +110,8 @@ def main(args):
             results_df=results_df,
             X_train_raw=X_train_raw,
             y_train=y_train,
+            X_test=X_test,
+            y_test=y_test,
             run_dir=run_dir
         )
         import shutil
