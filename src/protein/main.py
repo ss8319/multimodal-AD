@@ -54,7 +54,7 @@ def main(args):
     
     print(f"   Number of folds: {args.n_folds}")
     print(f"   Samples per fold: ~{len(X_train_raw) // args.n_folds}")
-    print(f"   Per-fold preprocessing enabled: Each fold will fit its own scaler")
+    print(f"   Per-fold preprocessing: Each fold fits its own scaler")
     
     print(f"\nEVALUATING CLASSIFIERS")
     print("-" * 70)
@@ -75,9 +75,7 @@ def main(args):
                 X_test=X_test,
                 y_test=y_test,
                 cv_splitter=cv_splitter,
-                clf_name=clf_name,
-                compute_test_confusion=False,
-                data_loader=data_loader
+                clf_name=clf_name
             )
 
             results.append(result)
@@ -95,7 +93,7 @@ def main(args):
             continue
 
     results_df = pd.DataFrame(results)
-    print_results_summary(results_df, test_available=test_available, show_confusion=False)
+    print_results_summary(results_df, test_available=test_available)
     
     print(f"\nSAVING RESULTS")
     print("-" * 70)
@@ -107,13 +105,11 @@ def main(args):
     
     if args.save_models:
         run_dir = create_run_directory()
-        use_per_fold_preprocessing = data_loader is not None
         save_all_models(
             classifiers=classifiers,
             results_df=results_df,
             X_train_raw=X_train_raw,
             y_train=y_train,
-            use_per_fold_preprocessing=use_per_fold_preprocessing,
             run_dir=run_dir
         )
         import shutil
