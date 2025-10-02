@@ -32,7 +32,6 @@ class ProteinDataLoader:
         self.random_state = random_state
         
         # Initialize preprocessing objects
-        self.scaler = StandardScaler() # See docs: https://scikit-learn.org/stable/modules/generated/sklearn.preprocessing.StandardScaler.html
         self.label_encoder = LabelEncoder()
         self.zero_var_cols = []
         self.feature_cols = []
@@ -45,129 +44,90 @@ class ProteinDataLoader:
     
     def prepare_features(self, df, fit=True):
         """
-        Extract and preprocess features
+        Extract and preprocess features (without scaling)
+        
+        Pipeline:
+        1. Identify feature columns (exclude metadata)
+        2. Impute missing values with median
+        3. Remove zero-variance features
+        4. Encode labels (AD=1, CN=0)
+        
+        Scaling is done separately per-fold in CV loop.
         
         Args:
             df: DataFrame with protein data
-            fit: If True, fit scaler and identify zero-variance cols. If False, use existing.
+            fit: If True, identify zero-variance cols and fit label encoder
         
         Returns:
-            X_scaled: Scaled feature matrix
+            X: DataFrame with preprocessed features (NOT scaled)
             y_encoded: Encoded labels (AD=1, CN=0)
-            feature_cols: List of feature column names
         """
-        # Identify feature columns (exclude metadata)
-        if not self.feature_cols:
-            exclude_cols = [self.id_col, self.label_col, 'VISCODE', 'subject_age']
-            print(f"exclude_cols: {exclude_cols}")
-            self.feature_cols = [c for c in df.columns if c not in exclude_cols]
-        
-        # Extract features and labels
-        X = df[self.feature_cols].fillna(df[self.feature_cols].median())
-        y = df[self.label_col]
-        
-        if fit:
-            # Remove zero variance features
-            self.zero_var_cols = X.columns[X.std() == 0].tolist()
-            if self.zero_var_cols:
-                print(f"⚠️  Removing {len(self.zero_var_cols)} zero-variance features")
-        
-        # Drop zero variance columns
-        if self.zero_var_cols:
-            X = X.drop(columns=self.zero_var_cols)
-            self.feature_cols = [c for c in self.feature_cols if c not in self.zero_var_cols]
-        
-        if fit:
-            # Fit label encoder and scaler
-            y_encoded = self.label_encoder.fit_transform(y)
-            # Swap encoding: AD=1, CN=0
-            y_encoded = 1 - y_encoded
-            X_scaled = self.scaler.fit_transform(X)
-        else:
-            # Transform using fitted encoders
-            y_encoded = self.label_encoder.transform(y)
-            y_encoded = 1 - y_encoded
-            X_scaled = self.scaler.transform(X)
-        
-        return X_scaled, y_encoded
-    
-    def get_raw_features(self, df):
-        """
-        Extract raw features WITHOUT scaling (for per-fold preprocessing)
-        
-        Args:
-            df: DataFrame with protein data
-            
-        Returns:
-            X_raw: DataFrame with raw features (imputed, no scaling)
-            y: Labels array
-        """
-        # Identify feature columns (exclude metadata)
+        # 1. Identify feature columns (exclude metadata)
         if not self.feature_cols:
             exclude_cols = [self.id_col, self.label_col, 'VISCODE', 'subject_age']
             self.feature_cols = [c for c in df.columns if c not in exclude_cols]
         
-        # Extract features and labels
+        # 2. Extract features and impute missing values
         X = df[self.feature_cols].fillna(df[self.feature_cols].median())
         y = df[self.label_col]
         
-        # Remove zero variance features (but don't scale)
-        if not self.zero_var_cols:
+        # 3. Remove zero-variance features
+        if fit:
             self.zero_var_cols = X.columns[X.std() == 0].tolist()
             if self.zero_var_cols:
-                print(f"⚠️  Removing {len(self.zero_var_cols)} zero-variance features")
+                print(f"   Removing {len(self.zero_var_cols)} zero-variance features")
         
         if self.zero_var_cols:
             X = X.drop(columns=self.zero_var_cols)
             self.feature_cols = [c for c in self.feature_cols if c not in self.zero_var_cols]
         
-        # Encode labels (but don't scale features)
-        if not hasattr(self.label_encoder, 'classes_'):
+        # 4. Encode labels (AD=1, CN=0)
+        if fit:
             y_encoded = self.label_encoder.fit_transform(y)
-            y_encoded = 1 - y_encoded  # Swap encoding: AD=1, CN=0
+            y_encoded = 1 - y_encoded  # Swap: AD=1, CN=0
         else:
             y_encoded = self.label_encoder.transform(y)
             y_encoded = 1 - y_encoded
         
-        return X, y_encoded  # Return DataFrame, not scaled array
+        return X, y_encoded  # Return DataFrame (not scaled)
     
-    def get_train_test_split(self, train_path, test_path=None, return_raw=False):
+    def get_train_test_split(self, train_path, test_path=None):
         """
         Load and prepare train and optional test sets
+        
+        Pipeline applied to both train and test:
+        1. Load CSV
+        2. Identify features (exclude metadata)
+        3. Impute missing values
+        4. Remove zero-variance features
+        5. Encode labels
+        
+        NO SCALING - that's done per-fold in CV loop
         
         Args:
             train_path: Path to training CSV
             test_path: Optional path to test CSV
-            return_raw: If True, return raw (unscaled) features for per-fold preprocessing
             
         Returns:
-            X_train, y_train, X_test, y_test, train_df (test can be None)
-            If return_raw=True: X_train is DataFrame, else numpy array
+            X_train: DataFrame with preprocessed features (NOT scaled)
+            y_train: Encoded labels (AD=1, CN=0)
+            X_test: DataFrame with preprocessed features (NOT scaled), or None
+            y_test: Encoded labels, or None
+            train_df: Original training DataFrame with metadata
         """
         # Load and prepare training data
         self.data_path = Path(train_path)
         train_df = self.load_data()
+        X_train, y_train = self.prepare_features(train_df, fit=True)
         
-        if return_raw:
-            # Return raw features for per-fold preprocessing
-            X_train, y_train = self.get_raw_features(train_df)
-            print(f"📊 Training set (RAW): {X_train.shape[0]} samples, {X_train.shape[1]} features")
-            
-            # Still need to fit scaler on full training set for test set transformation
-            # This is ONLY used for test set, not for CV
-            _ = self.scaler.fit(X_train)
-        else:
-            # Return pre-scaled features (old behavior)
-            X_train, y_train = self.prepare_features(train_df, fit=True)
-            print(f"📊 Training set: {X_train.shape[0]} samples, {X_train.shape[1]} features")
-        
-        print(f"   Classes: {dict(zip(self.label_encoder.classes_, [1, 0]))}")  # AD=1, CN=0
+        print(f"   Training set: {X_train.shape[0]} samples, {X_train.shape[1]} features")
+        print(f"   Label encoding: {dict(zip(self.label_encoder.classes_, [1, 0]))}")  # AD=1, CN=0
         
         # Show class distribution
         class_counts = pd.Series(train_df[self.label_col]).value_counts()
-        print(f"\n📈 Class distribution:")
+        print(f"   Class distribution:")
         for class_name, count in class_counts.items():
-            print(f"   • {class_name}: {count} ({count/len(train_df)*100:.1f}%)")
+            print(f"     {class_name}: {count} ({count/len(train_df)*100:.1f}%)")
         
         # Load test data if provided
         X_test, y_test = None, None
@@ -175,10 +135,9 @@ class ProteinDataLoader:
             try:
                 self.data_path = Path(test_path)
                 test_df = self.load_data()
-                # Test set is ALWAYS pre-scaled (using training set statistics)
                 X_test, y_test = self.prepare_features(test_df, fit=False)
-                print(f"\n📊 Test set: {X_test.shape[0]} samples, {X_test.shape[1]} features")
+                print(f"   Test set: {X_test.shape[0]} samples, {X_test.shape[1]} features")
             except FileNotFoundError:
-                print(f"⚠️  Test set not found: {test_path}")
+                print(f"   Test set not found: {test_path}")
         
         return X_train, y_train, X_test, y_test, train_df

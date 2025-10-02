@@ -28,8 +28,7 @@ def main(args):
     
     X_train_raw, y_train, X_test, y_test, train_df = data_loader.get_train_test_split(
         train_path=args.train_data,
-        test_path=args.test_data,
-        return_raw=True
+        test_path=args.test_data
     )
 
     print(f"\nSETTING UP {args.n_folds}-FOLD CROSS-VALIDATION")
