@@ -1,0 +1,7 @@
+# Ignore all run directories
+run_*/
+
+# But track this .gitignore and README
+!.gitignore
+!README.md
+
