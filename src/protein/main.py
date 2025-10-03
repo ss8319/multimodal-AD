@@ -19,16 +19,20 @@ def main(args):
     print("\nLOADING AND PREPROCESSING DATA")
     print("-" * 70)
     
+    # Convert paths to Path objects for cross-platform compatibility
+    train_data_path = Path(args.train_data)
+    test_data_path = Path(args.test_data) if args.test_data else None
+    
     data_loader = ProteinDataLoader(
-        data_path=args.train_data,
+        data_path=str(train_data_path),
         label_col=args.label_col,
         id_col=args.id_col,
         random_state=args.random_state
     )
     
     X_train_raw, y_train, X_test, y_test, train_df = data_loader.get_train_test_split(
-        train_path=args.train_data,
-        test_path=args.test_data
+        train_path=str(train_data_path),
+        test_path=str(test_data_path) if test_data_path else None
     )
 
     print(f"\nSETTING UP {args.n_folds}-FOLD CROSS-VALIDATION")
@@ -40,7 +44,7 @@ def main(args):
         random_state=args.random_state
     )
     
-    data_folder = Path(args.train_data).parent
+    data_folder = train_data_path.parent
 
     # Generate fold_df here, but save it later if --save-models is true
     fold_df = save_cv_fold_indices(
