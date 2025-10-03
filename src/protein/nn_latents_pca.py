@@ -8,9 +8,10 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 from sklearn.decomposition import PCA
 
-# Paths configuration
+# Configuration
 RUN_DIR = "src/protein/runs/run_20251002_170038"
 LATENTS_DIR = f"{RUN_DIR}/latents/neural_network"
+SHOW_DIAGONALS = False  # Set to True to show histograms on diagonal, False to hide them
 
 # 1. Load latents from files
 print("Loading latents...")
@@ -72,7 +73,7 @@ print(f"  Layer 1: {np.sum(pca1.explained_variance_ratio_):.4f}")
 print(f"  Layer 2: {np.sum(pca2.explained_variance_ratio_):.4f}")
 
 # 4. Create pairwise scatterplots of the 4 PCs
-def plot_pairwise_pca(reduced_data, class_labels, layer_name, output_file):
+def plot_pairwise_pca(reduced_data, class_labels, layer_name, output_file, show_diagonals=True):
     """
     Create pairwise scatterplots of the 4 principal components
     
@@ -81,6 +82,7 @@ def plot_pairwise_pca(reduced_data, class_labels, layer_name, output_file):
         class_labels: Class labels (AD=1, CN=0)
         layer_name: Name of the layer for the title
         output_file: Output file path
+        show_diagonals: Whether to show histograms on diagonal (default: True)
     """
     # Create figure with subplots for all pairwise combinations
     fig, axes = plt.subplots(4, 4, figsize=(14, 12))
@@ -96,21 +98,28 @@ def plot_pairwise_pca(reduced_data, class_labels, layer_name, output_file):
         for j in range(4):
             ax = axes[i, j]
             
-            # On diagonal, show histogram
+            # On diagonal, show histogram or empty plot
             if i == j:
-                for class_val in np.unique(class_labels):
-                    mask = class_labels == class_val
-                    ax.hist(
-                        reduced_data[mask, i], 
-                        alpha=0.5, 
-                        color=colors[class_val], 
-                        label=class_names[class_val]
-                    )
-                ax.set_title(f"PC{i+1} Distribution")
-                
-                # Only show legend on first diagonal
-                if i == 0:
-                    ax.legend()
+                if show_diagonals:
+                    for class_val in np.unique(class_labels):
+                        mask = class_labels == class_val
+                        ax.hist(
+                            reduced_data[mask, i], 
+                            alpha=0.5, 
+                            color=colors[class_val], 
+                            label=class_names[class_val]
+                        )
+                    ax.set_title(f"PC{i+1} Distribution")
+                    
+                    # Only show legend on first diagonal
+                    if i == 0:
+                        ax.legend()
+                else:
+                    # Empty diagonal plot
+                    ax.set_title(f"PC{i+1}")
+                    ax.text(0.5, 0.5, f"PC{i+1}", 
+                           transform=ax.transAxes, ha='center', va='center',
+                           fontsize=12, alpha=0.5)
             
             # Off diagonal, show scatter
             else:
@@ -147,9 +156,9 @@ def plot_pairwise_pca(reduced_data, class_labels, layer_name, output_file):
     return fig
 
 # Plot pairwise PCA for both layers
-print("\nCreating pairwise PCA plots...")
-plot_pairwise_pca(layer1_reduced, class_labels, "Hidden Layer 1", "layer1_pca_pairwise.png")
-plot_pairwise_pca(layer2_reduced, class_labels, "Hidden Layer 2", "layer2_pca_pairwise.png")
+print(f"\nCreating pairwise PCA plots (diagonals: {'ON' if SHOW_DIAGONALS else 'OFF'})...")
+plot_pairwise_pca(layer1_reduced, class_labels, "Hidden Layer 1", "layer1_pca_pairwise.png", show_diagonals=SHOW_DIAGONALS)
+plot_pairwise_pca(layer2_reduced, class_labels, "Hidden Layer 2", "layer2_pca_pairwise.png", show_diagonals=SHOW_DIAGONALS)
 
 # 5. Create a single plot showing PC1 vs PC2 for both layers
 plt.figure(figsize=(12, 6))
@@ -200,9 +209,3 @@ plt.tight_layout()
 plt.savefig("nn_layers_pc1_pc2_comparison.png", dpi=150, bbox_inches='tight')
 print("Saved PC1 vs PC2 comparison plot to: nn_layers_pc1_pc2_comparison.png")
 
-# 6. Save reduced latents with class labels
-print("\nSaving reduced latents with class labels...")
-np.savez("layer1_pca4d_with_labels.npz", data=layer1_reduced, labels=class_labels)
-np.savez("layer2_pca4d_with_labels.npz", data=layer2_reduced, labels=class_labels)
-print("  Saved: layer1_pca4d_with_labels.npz")
-print("  Saved: layer2_pca4d_with_labels.npz")
