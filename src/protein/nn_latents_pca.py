@@ -13,6 +13,13 @@ RUN_DIR = "src/protein/runs/run_20251002_170038"
 LATENTS_DIR = f"{RUN_DIR}/latents/neural_network"
 SHOW_DIAGONALS = False  # Set to True to show histograms on diagonal, False to hide them
 
+# Create output directory for this analysis
+from datetime import datetime
+timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+OUTPUT_DIR = Path(LATENTS_DIR) / "visualisation" / f"pca_analysis_{timestamp}"
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+print(f"Output directory: {OUTPUT_DIR}")
+
 # 1. Load latents from files
 print("Loading latents...")
 layer1 = np.load(f"{LATENTS_DIR}/hidden_layer_1.npy")
@@ -157,8 +164,8 @@ def plot_pairwise_pca(reduced_data, class_labels, layer_name, output_file, show_
 
 # Plot pairwise PCA for both layers
 print(f"\nCreating pairwise PCA plots (diagonals: {'ON' if SHOW_DIAGONALS else 'OFF'})...")
-plot_pairwise_pca(layer1_reduced, class_labels, "Hidden Layer 1", "layer1_pca_pairwise.png", show_diagonals=SHOW_DIAGONALS)
-plot_pairwise_pca(layer2_reduced, class_labels, "Hidden Layer 2", "layer2_pca_pairwise.png", show_diagonals=SHOW_DIAGONALS)
+plot_pairwise_pca(layer1_reduced, class_labels, "Hidden Layer 1", OUTPUT_DIR / "layer1_pca_pairwise.png", show_diagonals=SHOW_DIAGONALS)
+plot_pairwise_pca(layer2_reduced, class_labels, "Hidden Layer 2", OUTPUT_DIR / "layer2_pca_pairwise.png", show_diagonals=SHOW_DIAGONALS)
 
 # 5. Create a single plot showing PC1 vs PC2 for both layers
 plt.figure(figsize=(12, 6))
@@ -206,6 +213,40 @@ plt.grid(alpha=0.3)
 plt.legend()
 
 plt.tight_layout()
-plt.savefig("nn_layers_pc1_pc2_comparison.png", dpi=150, bbox_inches='tight')
-print("Saved PC1 vs PC2 comparison plot to: nn_layers_pc1_pc2_comparison.png")
+plt.savefig(OUTPUT_DIR / "nn_layers_pc1_pc2_comparison.png", dpi=150, bbox_inches='tight')
+print(f"Saved PC1 vs PC2 comparison plot to: {OUTPUT_DIR / 'nn_layers_pc1_pc2_comparison.png'}")
+
+# 6. Save analysis summary and data
+print(f"\nSaving analysis summary...")
+
+# Save PCA results
+pca_results = {
+    'layer1': {
+        'explained_variance_ratio': pca1.explained_variance_ratio_.tolist(),
+        'cumulative_variance': np.cumsum(pca1.explained_variance_ratio_).tolist(),
+        'total_variance_explained': float(np.sum(pca1.explained_variance_ratio_)),
+        'components_shape': layer1_reduced.shape
+    },
+    'layer2': {
+        'explained_variance_ratio': pca2.explained_variance_ratio_.tolist(),
+        'cumulative_variance': np.cumsum(pca2.explained_variance_ratio_).tolist(),
+        'total_variance_explained': float(np.sum(pca2.explained_variance_ratio_)),
+        'components_shape': layer2_reduced.shape
+    },
+    'class_distribution': {
+        'AD_count': int(np.sum(class_labels == 1)),
+        'CN_count': int(np.sum(class_labels == 0)),
+        'total_samples': len(class_labels)
+    },
+    'analysis_settings': {
+        'show_diagonals': SHOW_DIAGONALS,
+        'n_components': 4,
+        'timestamp': timestamp
+    }
+}
+
+import json
+with open(OUTPUT_DIR / "analysis_summary.json", 'w') as f:
+    json.dump(pca_results, f, indent=2)
+
 
