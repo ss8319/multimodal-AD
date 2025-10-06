@@ -26,6 +26,7 @@ def train_one_epoch(model, dataloader, criterion, optimizer, device):
     total_loss = 0
     all_preds = []
     all_labels = []
+    all_probs = []
     
     for batch_idx, batch in enumerate(dataloader):
         # Get features and labels
@@ -43,7 +44,9 @@ def train_one_epoch(model, dataloader, criterion, optimizer, device):
         
         # Track metrics
         total_loss += loss.item()
+        probs = torch.softmax(logits, dim=1)[:, 1]  # Probability of AD (class 1)
         preds = torch.argmax(logits, dim=1)
+        all_probs.extend(probs.detach().cpu().numpy())
         all_preds.extend(preds.cpu().numpy())
         all_labels.extend(labels.cpu().numpy())
         
@@ -53,9 +56,18 @@ def train_one_epoch(model, dataloader, criterion, optimizer, device):
     # Calculate metrics
     avg_loss = total_loss / len(dataloader)
     acc = accuracy_score(all_labels, all_preds)
+    
+    # Calculate AUC (set to 0.5 if only one class present)
+    try:
+        auc = roc_auc_score(all_labels, all_probs)
+    except ValueError as e:
+        # Single class in labels - AUC undefined, use 0.5 (random chance)
+        print(f"  Warning: AUC calculation failed (single class) - setting to 0.5")
+        auc = 0.5
+    
     cm = confusion_matrix(all_labels, all_preds)
     
-    return avg_loss, acc, cm
+    return avg_loss, acc, auc, cm
 
 
 def evaluate(model, dataloader, criterion, device):
@@ -90,10 +102,13 @@ def evaluate(model, dataloader, criterion, device):
     avg_loss = total_loss / len(dataloader)
     acc = accuracy_score(all_labels, all_preds)
     
+    # Calculate AUC (set to 0.5 if only one class present)
     try:
         auc = roc_auc_score(all_labels, all_probs)
-    except:
-        auc = 0.0  # In case of single class in batch
+    except ValueError as e:
+        # Single class in labels - AUC undefined, use 0.5 (random chance)
+        print(f"  Warning: AUC calculation failed (single class) - setting to 0.5")
+        auc = 0.5
     
     # Confusion matrix
     cm = confusion_matrix(all_labels, all_preds)
@@ -226,7 +241,7 @@ def main():
         print("-" * 40)
         
         # Train
-        train_loss, train_acc, train_cm = train_one_epoch(
+        train_loss, train_acc, train_auc, train_cm = train_one_epoch(
             model, train_loader, criterion, optimizer, device
         )
         
@@ -236,7 +251,7 @@ def main():
         )
         
         # Print results
-        print_results("Train", train_loss, train_acc, cm=train_cm)
+        print_results("Train", train_loss, train_acc, train_auc, train_cm)
         print_results("Test", test_loss, test_acc, test_auc, test_cm)
         
         # Save best model
