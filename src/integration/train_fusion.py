@@ -127,7 +127,8 @@ def main():
         'train_csv': '/home/ssim0068/data/multimodal-dataset/train.csv',
         'test_csv': '/home/ssim0068/data/multimodal-dataset/test.csv',
         'brainiac_checkpoint': '/home/ssim0068/code/multimodal-AD/BrainIAC/src/checkpoints/BrainIAC.ckpt',
-        'protein_run_dir': None,  # Use raw protein features for now
+        'protein_run_dir': None,  # On-the-fly extraction (may have compatibility issues)
+        'protein_latents_dir': '/home/ssim0068/data/multimodal-dataset/protein_latents',  # Pre-extracted latents
         'protein_model_type': 'mlp',  # 'mlp' or 'transformer'
         'protein_layer': 'hidden_layer_2',  # 'hidden_layer_2' for MLP, 'transformer_embeddings' for Transformer
         'batch_size': 8 if torch.cuda.is_available() else 4,  # Larger batch on GPU
@@ -164,6 +165,7 @@ def main():
         csv_path=config['train_csv'],
         brainiac_model=brainiac_model,
         protein_run_dir=config['protein_run_dir'],
+        protein_latents_dir=config.get('protein_latents_dir'),
         protein_model_type=config['protein_model_type'],
         protein_layer=config['protein_layer'],
         device=device
@@ -173,6 +175,7 @@ def main():
         csv_path=config['test_csv'],
         brainiac_model=brainiac_model,
         protein_run_dir=config['protein_run_dir'],
+        protein_latents_dir=config.get('protein_latents_dir'),
         protein_model_type=config['protein_model_type'],
         protein_layer=config['protein_layer'],
         device=device
