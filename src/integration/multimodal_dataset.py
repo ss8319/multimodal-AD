@@ -32,6 +32,7 @@ class MultimodalDataset(Dataset):
         brainiac_model=None,
         brainiac_checkpoint=None,
         protein_run_dir=None,
+        protein_latents_dir=None,
         protein_model_type='mlp',
         protein_layer='hidden_layer_2',
         protein_columns=None,
@@ -42,7 +43,8 @@ class MultimodalDataset(Dataset):
             csv_path: Path to train.csv or test.csv
             brainiac_model: Pre-loaded BrainIAC model (recommended for efficiency)
             brainiac_checkpoint: Path to BrainIAC checkpoint (if model not provided)
-            protein_run_dir: Path to protein model run directory
+            protein_run_dir: Path to protein model run directory (for on-the-fly extraction)
+            protein_latents_dir: Path to pre-extracted protein latents directory (recommended)
             protein_model_type: 'mlp' or 'transformer'
             protein_layer: Layer to extract from ('hidden_layer_2' for MLP, 'transformer_embeddings' for Transformer)
             protein_columns: List of protein column names (auto-detected if None)
@@ -69,15 +71,34 @@ class MultimodalDataset(Dataset):
         
         print(f"  Protein features: {len(self.protein_columns)} columns")
         
-        # Load protein extractor
-        if protein_run_dir is not None:
+        # Load protein features (either pre-extracted latents or on-the-fly extraction)
+        self.protein_latents = None
+        self.protein_extractor = None
+        
+        if protein_latents_dir is not None:
+            # Load pre-extracted latents
+            protein_latents_dir = Path(protein_latents_dir)
+            split_name = 'train' if 'train' in str(csv_path).lower() else 'test'
+            latents_file = protein_latents_dir / f"{split_name}_protein_latents.npy"
+            
+            if latents_file.exists():
+                self.protein_latents = np.load(latents_file)
+                print(f"  Loaded pre-extracted protein latents: {self.protein_latents.shape}")
+                
+                # Verify number of samples matches
+                if len(self.protein_latents) != len(self.df):
+                    raise ValueError(f"Latents size {len(self.protein_latents)} != CSV size {len(self.df)}")
+            else:
+                raise FileNotFoundError(f"Pre-extracted latents not found: {latents_file}")
+        
+        elif protein_run_dir is not None:
+            # On-the-fly extraction (may have NumPy compatibility issues)
             print(f"  Loading protein extractor from: {protein_run_dir}")
             self.protein_extractor = ProteinLatentExtractor(protein_run_dir, device)
             self.protein_model_type = protein_model_type
             self.protein_layer = protein_layer
             print(f"  Protein model: {protein_model_type}, layer: {protein_layer}")
         else:
-            self.protein_extractor = None
             print(f"  No protein model - using raw features")
         
         # Load or store BrainIAC model
@@ -95,8 +116,12 @@ class MultimodalDataset(Dataset):
         # Get dimensions
         self.raw_protein_dim = len(self.protein_columns)
         
-        if self.protein_extractor is not None:
+        if self.protein_latents is not None:
+            # Use pre-extracted latents dimension
+            self.protein_dim = self.protein_latents.shape[1]
+        elif self.protein_extractor is not None:
             # Extract latents to get actual dimension
+            # only using dummy data to get the output dimension of the protein encoder
             dummy_protein = np.random.randn(self.raw_protein_dim).astype(np.float32)
             if self.protein_model_type == 'mlp':
                 dummy_latents = self.protein_extractor.extract_mlp_latents(dummy_protein, self.protein_layer)
@@ -115,12 +140,14 @@ class MultimodalDataset(Dataset):
         return len(self.df)
     
     def _extract_protein_features(self, idx):
-        """Extract protein features from CSV row"""
-        row = self.df.iloc[idx]
-        protein_values = row[self.protein_columns].values.astype(np.float32)
-        
-        if self.protein_extractor is not None:
-            # Extract latents using trained protein model
+        """Extract protein features from CSV row or pre-extracted latents"""
+        if self.protein_latents is not None:
+            # Use pre-extracted latents
+            return self.protein_latents[idx]
+        elif self.protein_extractor is not None:
+            # Extract latents on-the-fly using trained protein model
+            row = self.df.iloc[idx]
+            protein_values = row[self.protein_columns].values.astype(np.float32)
             if self.protein_model_type == 'mlp':
                 protein_latents = self.protein_extractor.extract_mlp_latents(protein_values, self.protein_layer)
             else:  # transformer
@@ -128,6 +155,8 @@ class MultimodalDataset(Dataset):
             return protein_latents
         else:
             # Return raw protein values
+            row = self.df.iloc[idx]
+            protein_values = row[self.protein_columns].values.astype(np.float32)
             return protein_values
     
     def _extract_mri_latents(self, mri_path):
