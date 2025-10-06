@@ -53,8 +53,9 @@ def train_one_epoch(model, dataloader, criterion, optimizer, device):
     # Calculate metrics
     avg_loss = total_loss / len(dataloader)
     acc = accuracy_score(all_labels, all_preds)
+    cm = confusion_matrix(all_labels, all_preds)
     
-    return avg_loss, acc
+    return avg_loss, acc, cm
 
 
 def evaluate(model, dataloader, criterion, device):
@@ -225,7 +226,7 @@ def main():
         print("-" * 40)
         
         # Train
-        train_loss, train_acc = train_one_epoch(
+        train_loss, train_acc, train_cm = train_one_epoch(
             model, train_loader, criterion, optimizer, device
         )
         
@@ -235,7 +236,7 @@ def main():
         )
         
         # Print results
-        print_results("Train", train_loss, train_acc)
+        print_results("Train", train_loss, train_acc, cm=train_cm)
         print_results("Test", test_loss, test_acc, test_auc, test_cm)
         
         # Save best model
