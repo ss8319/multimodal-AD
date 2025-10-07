@@ -108,6 +108,7 @@ class ProteinLatentExtractor:
         """
         if self.scaler is None:
             # No scaler available - return raw values
+            print("  Warning: No scaler found, using raw protein values")
             return protein_values
         
         # Reshape for scaler (expects 2D array)
