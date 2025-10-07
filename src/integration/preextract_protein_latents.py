@@ -86,6 +86,18 @@ def preextract_latents(
         model = pickle.load(f)
     print(f"  Model type: {type(model).__name__}")
     print(f"  Architecture: {model.hidden_layer_sizes}")
+    
+    # Load scaler if available
+    scaler_path = Path(protein_model_path).parent.parent / "scaler.pkl"
+    scaler = None
+    if scaler_path.exists():
+        print(f"Loading scaler from: {scaler_path}")
+        with open(scaler_path, 'rb') as f:
+            scaler = pickle.load(f)
+        print(f"  Scaler loaded successfully")
+    else:
+        print(f"  Warning: No scaler found at {scaler_path}")
+        print(f"  Using raw protein values (no scaling)")
     print()
     
     # Process train and test sets
@@ -111,14 +123,17 @@ def preextract_latents(
         # Extract protein values
         X_raw = df[protein_cols].values.astype(np.float32)
         
-        # Note: We're using raw values without scaling
-        # If your model was trained with scaling, you need to load and apply the scaler here
-        print(f"  Warning: Using raw protein values (no scaling applied)")
-        print(f"  If your model expects scaled input, you need to apply StandardScaler")
+        # Apply scaling if scaler is available
+        if scaler is not None:
+            print(f"  Applying StandardScaler...")
+            X_scaled = scaler.transform(X_raw)
+        else:
+            print(f"  Using raw values (no scaling)")
+            X_scaled = X_raw
         
         # Extract latents
         print(f"  Extracting latents from {layer_name}...")
-        latents = extract_mlp_latents_batch(model, X_raw, layer_name)
+        latents = extract_mlp_latents_batch(model, X_scaled, layer_name)
         print(f"  Latent shape: {latents.shape}")
         
         # Save latents
@@ -141,9 +156,11 @@ def preextract_latents(
     # Save metadata
     metadata = {
         'model_path': str(protein_model_path),
+        'scaler_path': str(scaler_path) if scaler_path.exists() else None,
         'layer_name': layer_name,
         'latent_dim': latents.shape[1],
-        'protein_columns': protein_cols
+        'protein_columns': protein_cols,
+        'scaling_applied': scaler is not None
     }
     
     import json
@@ -156,10 +173,11 @@ def preextract_latents(
     print("✅ PRE-EXTRACTION COMPLETE")
     print("="*60)
     print(f"Latent dimension: {latents.shape[1]}")
+    print(f"Scaling applied: {scaler is not None}")
     print(f"Files saved in: {output_dir}")
     print("\nNext steps:")
     print("1. Use these pre-extracted latents in multimodal_dataset.py")
-    print("2. Run training in 'brainiac' environment")
+    print("2. Run training in 'multimodal' environment")
 
 
 if __name__ == "__main__":
