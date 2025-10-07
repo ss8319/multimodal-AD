@@ -9,11 +9,14 @@ import pickle
 from pathlib import Path
 import sys
 
-# Add protein module path
-sys.path.append(str(Path(__file__).parent.parent / "protein"))
-
 from sklearn.preprocessing import StandardScaler
 from sklearn.neural_network import MLPClassifier
+
+# Import ProteinTransformer (will be loaded on demand)
+try:
+    from src.protein.model import ProteinTransformer
+except ImportError:
+    ProteinTransformer = None
 
 
 class ProteinLatentExtractor:
@@ -60,6 +63,54 @@ class ProteinLatentExtractor:
         print(f"  Loaded MLP model from {model_path}")
         return self.mlp_model
     
+    def _infer_model_config(self, state_dict):
+        """
+        Infer ProteinTransformer architecture from state dict
+        More reliable than depending on saved config
+        """
+        config = {}
+        
+        # Infer n_features from input_projection.weight
+        if 'input_projection.weight' in state_dict:
+            weight_shape = state_dict['input_projection.weight'].shape
+            config['n_features'] = weight_shape[1]  # input dimension
+            config['d_model'] = weight_shape[0]     # output dimension
+        else:
+            raise ValueError("Cannot find input_projection.weight in state dict")
+        
+        # Infer n_layers by counting transformer layers
+        transformer_keys = [k for k in state_dict.keys() if k.startswith('transformer.layers.')]
+        if transformer_keys:
+            # Extract layer numbers and find max
+            layer_nums = []
+            for key in transformer_keys:
+                parts = key.split('.')
+                if len(parts) >= 3 and parts[2].isdigit():
+                    layer_nums.append(int(parts[2]))
+            config['n_layers'] = max(layer_nums) + 1 if layer_nums else 1
+        else:
+            config['n_layers'] = 1
+        
+        # Infer n_heads from self_attn.in_proj_weight shape
+        # in_proj_weight shape is [3*d_model, d_model] for multi-head attention
+        attn_keys = [k for k in state_dict.keys() if 'self_attn.in_proj_weight' in k]
+        if attn_keys:
+            # Use first layer's attention weights
+            attn_weight_shape = state_dict[attn_keys[0]].shape
+            # in_proj_weight = [3*d_model, d_model], so n_heads = d_model / head_dim
+            # We'll assume head_dim = 32 (common default)
+            head_dim = 32
+            config['n_heads'] = config['d_model'] // head_dim
+            # Ensure n_heads is reasonable
+            config['n_heads'] = max(1, min(config['n_heads'], 8))
+        else:
+            config['n_heads'] = 2
+        
+        # Set reasonable defaults for other parameters
+        config['dropout'] = 0.2
+        
+        return config
+    
     def load_transformer_model(self):
         """Load ProteinTransformer model"""
         if self.transformer_model is not None:
@@ -69,26 +120,19 @@ class ProteinLatentExtractor:
         if not model_path.exists():
             raise FileNotFoundError(f"Transformer model not found: {model_path}")
         
-        # Import here to avoid circular imports
-        from model import ProteinTransformer
+        # Check if ProteinTransformer is available
+        if ProteinTransformer is None:
+            raise ImportError("ProteinTransformer not available. Make sure src.protein.model is accessible.")
         
         # Load model state
         checkpoint = torch.load(model_path, map_location=self.device)
         
-        # Get n_features from checkpoint or config
-        if 'config' in checkpoint:
-            n_features = checkpoint['config']['n_features']
-        else:
-            # Try to infer from model state dict
-            # Look for input layer weights to determine input size
-            for key, value in checkpoint['model_state_dict'].items():
-                if 'input_projection.weight' in key:
-                    n_features = value.shape[1]
-                    break
-            else:
-                raise ValueError("Could not determine n_features from checkpoint")
+        # Infer model architecture from state dict (more reliable than config)
+        print("  Inferring model architecture from state dict...")
+        config = self._infer_model_config(checkpoint['model_state_dict'])
+        print(f"  Inferred config: {config}")
         
-        self.transformer_model = ProteinTransformer(n_features=n_features)
+        self.transformer_model = ProteinTransformer(**config)
         self.transformer_model.load_state_dict(checkpoint['model_state_dict'])
         self.transformer_model.to(self.device)
         self.transformer_model.eval()

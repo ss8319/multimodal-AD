@@ -145,8 +145,8 @@ def main():
         'brainiac_checkpoint': '/home/ssim0068/code/multimodal-AD/BrainIAC/src/checkpoints/BrainIAC.ckpt',
         'protein_run_dir': '/home/ssim0068/multimodal-AD/src/protein/runs/run_20251003_133215',  # On-the-fly extraction (now works!)
         'protein_latents_dir': None,  # Pre-extracted latents (not needed anymore)
-        'protein_model_type': 'mlp',  # 'mlp' or 'transformer'
-        'protein_layer': 'hidden_layer_2',  # 'hidden_layer_2' for MLP, 'transformer_embeddings' for Transformer
+        'protein_model_type': 'transformer',  # 'mlp' or 'transformer'
+        'protein_layer': 'transformer_embeddings',  # 'hidden_layer_2' for MLP, 'transformer_embeddings' for Transformer
         'batch_size': 8 if torch.cuda.is_available() else 4,  # Larger batch on GPU
         'num_epochs': 50,
         'learning_rate': 0.001,
@@ -161,6 +161,7 @@ def main():
     print("="*60)
     print(f"Model: Fusion (protein + MRI)")
     print(f"Protein model: {config['protein_model_type']} ({config['protein_layer']})")
+    print(f"Protein run dir: {config['protein_run_dir']}")
     print(f"Batch size: {config['batch_size']}")
     print(f"Epochs: {config['num_epochs']}")
     print(f"Learning rate: {config['learning_rate']}")
