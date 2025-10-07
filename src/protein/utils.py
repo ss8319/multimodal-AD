@@ -300,14 +300,22 @@ def save_all_models(classifiers, results_df, X_train_raw, y_train, X_test, y_tes
     test_available = X_test is not None and y_test is not None
     final_test_results = []
     
+    # Fit scaler on full training set (shared across all models)
+    scaler = StandardScaler()
+    X_train_scaled = scaler.fit_transform(X_train_raw)
+    
+    # Save the scaler for later use in inference
+    scaler_path = Path(run_dir) / "scaler.pkl"
+    with open(scaler_path, 'wb') as f:
+        pickle.dump(scaler, f)
+    print(f"   Saved scaler: {scaler_path.name}")
+    
     for clf_name, clf in classifiers.items():
         try:
             print(f"\n   Training {clf_name}...")
 
-            # Clone and scale the full training set
+            # Clone and train on scaled data
             final_clf = clone(clf)
-            scaler = StandardScaler()
-            X_train_scaled = scaler.fit_transform(X_train_raw)
             final_clf.fit(np.asarray(X_train_scaled), y_train)
 
             # Evaluate on test set if available
@@ -350,3 +358,4 @@ def save_all_models(classifiers, results_df, X_train_raw, y_train, X_test, y_tes
         print(f"   Best final model: {best_test['model']} (AUC: {best_test.get('test_auc', 'N/A'):.3f})")
     
     print(f"\nAll models saved to: {run_dir / 'models'}")
+    print(f"Scaler saved to: {scaler_path}")
