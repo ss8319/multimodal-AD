@@ -6,11 +6,15 @@ Simple implementation with train/test evaluation
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Subset
 import numpy as np
+import pandas as pd
 from pathlib import Path
-from sklearn.metrics import accuracy_score, roc_auc_score, confusion_matrix
+from sklearn.metrics import accuracy_score, roc_auc_score, confusion_matrix, precision_recall_fscore_support, balanced_accuracy_score
+from sklearn.model_selection import StratifiedKFold, train_test_split
 import sys
+import json
+from datetime import datetime
 
 # Add paths
 sys.path.append(str(Path(__file__).parent.parent / "mri" / "BrainIAC" / "src"))
@@ -20,6 +24,107 @@ from fusion_model import get_model
 from load_brainiac import load_brainiac
 
 
+def create_cv_splits(csv_path, n_splits=5, split_ratio=(0.6, 0.2, 0.2), random_state=42):
+    """
+    Create stratified K-fold cross-validation splits with specified ratio
+    
+    Args:
+        csv_path: Path to CSV with all data
+        n_splits: Number of CV folds
+        split_ratio: (train, val, test) ratio - e.g., (0.6, 0.2, 0.2)
+        random_state: Random seed for reproducibility
+    
+    Returns:
+        List of (train_indices, val_indices, test_indices) for each fold
+    """
+    # Load data
+    df = pd.read_csv(csv_path)
+    
+    # Get labels for stratification
+    labels = (df['research_group'] == 'AD').astype(int).values
+    
+    # Create splits
+    cv_splits = []
+    train_ratio, val_ratio, test_ratio = split_ratio
+    
+    print(f"\n{'='*60}")
+    print(f"CREATING {n_splits}-FOLD CROSS-VALIDATION SPLITS")
+    print(f"{'='*60}")
+    print(f"Total samples: {len(df)}")
+    print(f"Split ratio (train:val:test): {train_ratio}:{val_ratio}:{test_ratio}")
+    print(f"Random state: {random_state}")
+    print(f"Class distribution: AD={labels.sum()}, CN={(1-labels).sum()}")
+    print()
+    
+    # Get all indices
+    all_indices = np.arange(len(df))
+    
+    # DIRECT APPROACH:
+    # 1. First create n_splits test sets with test_ratio*n_samples samples each
+    # 2. Then for each fold, split the remaining samples into train and val
+    
+    # Calculate target sizes
+    n_samples = len(df)
+    n_test = int(test_ratio * n_samples)
+    n_val = int(val_ratio * n_samples)
+    n_train = n_samples - n_test - n_val
+    
+    # Ensure we have at least 1 sample in each split
+    if n_test < 1 or n_val < 1 or n_train < 1:
+        raise ValueError(f"Split ratio {split_ratio} results in empty splits. Use a different ratio or more samples.")
+    
+    # Set random seed for reproducibility
+    np.random.seed(random_state)
+    
+    # For each fold, create a stratified split
+    for fold_idx in range(n_splits):
+        # For fold i, we'll:
+        # 1. Split data into test and train+val (stratified)
+        # 2. Split train+val into train and val (stratified)
+        
+        # First split: full dataset -> test and train+val
+        train_val_idx, test_idx = train_test_split(
+            all_indices,
+            test_size=test_ratio,
+            random_state=random_state + fold_idx,
+            stratify=labels
+        )
+        
+        # Second split: train+val -> train and val
+        train_val_labels = labels[train_val_idx]
+        val_size_relative = val_ratio / (train_ratio + val_ratio)
+        
+        train_idx, val_idx = train_test_split(
+            train_val_idx,
+            test_size=val_size_relative,
+            random_state=random_state + fold_idx + 100,  # Different seed
+            stratify=train_val_labels
+        )
+        
+        # Store the split
+        cv_splits.append((train_idx, val_idx, test_idx))
+        
+        # Print fold info
+        train_labels = labels[train_idx]
+        val_labels = labels[val_idx]
+        test_labels = labels[test_idx]
+        
+        print(f"Fold {fold_idx}:")
+        print(f"  Train: {len(train_idx):2d} samples (AD={train_labels.sum():2d}, CN={(1-train_labels).sum():2d})")
+        print(f"  Val:   {len(val_idx):2d} samples (AD={val_labels.sum():2d}, CN={(1-val_labels).sum():2d})")
+        print(f"  Test:  {len(test_idx):2d} samples (AD={test_labels.sum():2d}, CN={(1-test_labels).sum():2d})")
+        
+        # Calculate and print actual ratios
+        total = len(df)
+        train_pct = len(train_idx) / total * 100
+        val_pct = len(val_idx) / total * 100
+        test_pct = len(test_idx) / total * 100
+        print(f"  Ratio: {train_pct:.1f}%:{val_pct:.1f}%:{test_pct:.1f}% (target: {train_ratio*100:.1f}%:{val_ratio*100:.1f}%:{test_ratio*100:.1f}%)")
+    
+    print()
+    return cv_splits
+
+
 def train_one_epoch(model, dataloader, criterion, optimizer, device):
     """Train for one epoch"""
     model.train()
@@ -27,6 +132,7 @@ def train_one_epoch(model, dataloader, criterion, optimizer, device):
     all_preds = []
     all_labels = []
     all_probs = []
+    all_true_labels = []  # Store for balanced accuracy
     
     for batch_idx, batch in enumerate(dataloader):
         # Get features and labels
@@ -49,6 +155,7 @@ def train_one_epoch(model, dataloader, criterion, optimizer, device):
         all_probs.extend(probs.detach().cpu().numpy())
         all_preds.extend(preds.cpu().numpy())
         all_labels.extend(labels.cpu().numpy())
+        all_true_labels.extend(labels.cpu().numpy())
         
         if (batch_idx + 1) % 5 == 0 or (batch_idx + 1) == len(dataloader):
             print(f"  Batch {batch_idx+1}/{len(dataloader)}, Loss: {loss.item():.4f}")
@@ -57,17 +164,30 @@ def train_one_epoch(model, dataloader, criterion, optimizer, device):
     avg_loss = total_loss / len(dataloader)
     acc = accuracy_score(all_labels, all_preds)
     
-    # Calculate AUC (set to 0.5 if only one class present)
-    try:
-        auc = roc_auc_score(all_labels, all_probs)
-    except ValueError as e:
-        # Single class in labels - AUC undefined, use 0.5 (random chance)
-        print(f"  Warning: AUC calculation failed (single class) - setting to 0.5")
+    # Check if model is predicting only one class (pathological case)
+    n_unique_preds = len(np.unique(all_preds))
+    n_unique_labels = len(np.unique(all_labels))
+    
+    # Calculate AUC
+    if n_unique_labels < 2:
+        # Single class in labels - AUC undefined
+        print(f"  ⚠️  Warning: Only one class in labels - AUC undefined, setting to 0.5")
         auc = 0.5
+    elif n_unique_preds < 2:
+        # Model predicting only one class - AUC is 0.5 (random chance)
+        print(f"  ⚠️  Warning: Model predicting only ONE class - Using AUC = 0.5 (random chance)")
+        auc = 0.5
+    else:
+        try:
+            auc = roc_auc_score(all_labels, all_probs)
+        except ValueError as e:
+            print(f"  ⚠️  Warning: AUC calculation failed - {e}")
+            auc = 0.5
     
-    cm = confusion_matrix(all_labels, all_preds)
+    cm = confusion_matrix(all_labels, all_preds, labels=[0, 1])
+    balanced_acc = balanced_accuracy_score(all_true_labels, all_preds)
     
-    return avg_loss, acc, auc, cm
+    return avg_loss, acc, auc, cm, balanced_acc
 
 
 def evaluate(model, dataloader, criterion, device):
@@ -102,16 +222,28 @@ def evaluate(model, dataloader, criterion, device):
     avg_loss = total_loss / len(dataloader)
     acc = accuracy_score(all_labels, all_preds)
     
-    # Calculate AUC (set to 0.5 if only one class present)
-    try:
-        auc = roc_auc_score(all_labels, all_probs)
-    except ValueError as e:
-        # Single class in labels - AUC undefined, use 0.5 (random chance)
-        print(f"  Warning: AUC calculation failed (single class) - setting to 0.5")
+    # Check if model is predicting only one class (pathological case)
+    n_unique_preds = len(np.unique(all_preds))
+    n_unique_labels = len(np.unique(all_labels))
+    
+    # Calculate AUC
+    if n_unique_labels < 2:
+        # Single class in labels - AUC undefined
+        print(f"  ⚠️  Warning: Only one class in labels - AUC undefined, setting to 0.5")
         auc = 0.5
+    elif n_unique_preds < 2:
+        # Model predicting only one class - AUC is 0.5 (random chance)
+        print(f"  ⚠️  Warning: Model predicting only ONE class - Using AUC = 0.5 (random chance)")
+        auc = 0.5
+    else:
+        try:
+            auc = roc_auc_score(all_labels, all_probs)
+        except ValueError as e:
+            print(f"  ⚠️  Warning: AUC calculation failed - {e}")
+            auc = 0.5
     
     # Confusion matrix
-    cm = confusion_matrix(all_labels, all_preds)
+    cm = confusion_matrix(all_labels, all_preds, labels=[0, 1])
     
     return avg_loss, acc, auc, cm, all_subjects, all_preds, all_labels
 
@@ -140,146 +272,296 @@ def print_results(split_name, loss, acc, auc=None, cm=None):
 def main():
     # Configuration
     config = {
-        'train_csv': '/home/ssim0068/data/multimodal-dataset/train.csv',
-        'test_csv': '/home/ssim0068/data/multimodal-dataset/test.csv',
+        # Data paths
+        'data_csv': '/home/ssim0068/data/multimodal-dataset/all.csv',  # All data for CV
         'brainiac_checkpoint': '/home/ssim0068/code/multimodal-AD/BrainIAC/src/checkpoints/BrainIAC.ckpt',
-        'protein_run_dir': '/home/ssim0068/multimodal-AD/src/protein/runs/run_20251003_133215',  # On-the-fly extraction (now works!)
-        'protein_latents_dir': None,  # Pre-extracted latents (not needed anymore)
+        'protein_run_dir': '/home/ssim0068/multimodal-AD/src/protein/runs/run_20251003_133215',
+        'protein_latents_dir': None,
+        
+        # Model config
         'protein_model_type': 'transformer',  # 'mlp' or 'transformer'
         'protein_layer': 'transformer_embeddings',  # 'hidden_layer_2' for MLP, 'transformer_embeddings' for Transformer
-        'batch_size': 8 if torch.cuda.is_available() else 4,  # Larger batch on GPU
-        'num_epochs': 50,
+        'hidden_dim': 128, #params for the fusion model
+        'dropout': 0.3, #params for the fusion model
+        
+        # Cross-validation config
+        'n_folds': 2,
+        'split_ratio': (0.6, 0.2, 0.2),  # train:val:test
+        'cv_seed': 42,
+        
+        # Training config
+        'batch_size': 8 if torch.cuda.is_available() else 4,
+        'num_epochs': 15,
         'learning_rate': 0.001,
-        'hidden_dim': 128,
-        'dropout': 0.3,
-        'device': 'cuda' if torch.cuda.is_available() else 'cpu',  # Auto-detect
-        'save_dir': '/home/ssim0068/multimodal-AD/runs/fusion'
+        'model_seed': 42,
+        'device': 'cuda' if torch.cuda.is_available() else 'cpu',
+        
+        # Save config
+        'save_dir': f'/home/ssim0068/multimodal-AD/runs/cv_{datetime.now().strftime("%Y%m%d_%H%M%S")}'
     }
     
     print("="*60)
-    print("MULTIMODAL FUSION TRAINING")
+    print("MULTIMODAL FUSION TRAINING - CROSS-VALIDATION")
     print("="*60)
     print(f"Model: Fusion (protein + MRI)")
     print(f"Protein model: {config['protein_model_type']} ({config['protein_layer']})")
-    print(f"Protein run dir: {config['protein_run_dir']}")
+    print(f"N-folds: {config['n_folds']}")
+    print(f"Split ratio: {config['split_ratio']}")
     print(f"Batch size: {config['batch_size']}")
     print(f"Epochs: {config['num_epochs']}")
     print(f"Learning rate: {config['learning_rate']}")
     print(f"Device: {config['device']}")
+    print(f"CV seed: {config['cv_seed']}")
+    print(f"Model seed: {config['model_seed']}")
     print()
     
     # Setup device
     device = torch.device(config['device'])
     
-    # Load BrainIAC model once (shared across all dataloaders)
+    # Create save directory
+    save_dir = Path(config['save_dir'])
+    save_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Save config
+    with open(save_dir / 'config.json', 'w') as f:
+        json.dump(config, f, indent=2)
+    
+    # Load BrainIAC model once (shared across all folds)
     print("Loading BrainIAC model...")
     brainiac_model = load_brainiac(config['brainiac_checkpoint'], device)
     print()
     
-    # Create datasets
-    print("Creating datasets...")
-    train_dataset = MultimodalDataset(
-        csv_path=config['train_csv'],
-        brainiac_model=brainiac_model,
-        protein_run_dir=config['protein_run_dir'],
-        protein_latents_dir=config.get('protein_latents_dir'),
-        protein_model_type=config['protein_model_type'],
-        protein_layer=config['protein_layer'],
-        device=device
+    # Create CV splits
+    cv_splits = create_cv_splits(
+        csv_path=config['data_csv'],
+        n_splits=config['n_folds'],
+        split_ratio=config['split_ratio'],
+        random_state=config['cv_seed']
     )
     
-    test_dataset = MultimodalDataset(
-        csv_path=config['test_csv'],
-        brainiac_model=brainiac_model,
-        protein_run_dir=config['protein_run_dir'],
-        protein_latents_dir=config.get('protein_latents_dir'),
-        protein_model_type=config['protein_model_type'],
-        protein_layer=config['protein_layer'],
-        device=device
-    )
-    print()
+    # Track results across folds
+    fold_results = []
     
-    # Create dataloaders
-    train_loader = DataLoader(
-        train_dataset,
-        batch_size=config['batch_size'],
-        shuffle=True,
-        num_workers=0
-    )
-    
-    test_loader = DataLoader(
-        test_dataset,
-        batch_size=config['batch_size'],
-        shuffle=False,
-        num_workers=0
-    )
-    
-    # Create fusion model
-    print("Creating fusion model...")
-    protein_dim = train_dataset.protein_dim
-    model = get_model(
-        protein_dim=protein_dim,
-        mri_dim=768,
-        hidden_dim=config['hidden_dim'],
-        dropout=config['dropout']
-    ).to(device)
-    print()
-    
-    # Setup training
-    criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(model.parameters(), lr=config['learning_rate'])
-    
-    # Training loop
-    print("="*60)
-    print("TRAINING")
-    print("="*60)
-    
-    best_test_auc = 0
-    best_epoch = 0
-    
-    for epoch in range(config['num_epochs']):
-        print(f"\nEpoch {epoch+1}/{config['num_epochs']}")
-        print("-" * 40)
+    # Train each fold
+    for fold_idx, (train_idx, val_idx, test_idx) in enumerate(cv_splits):
+        print("\n" + "="*60)
+        print(f"FOLD {fold_idx + 1}/{config['n_folds']}")
+        print("="*60)
         
-        # Train
-        train_loss, train_acc, train_auc, train_cm = train_one_epoch(
-            model, train_loader, criterion, optimizer, device
+        # Create fold directory
+        fold_dir = save_dir / f'fold_{fold_idx}'
+        fold_dir.mkdir(exist_ok=True)
+        
+        # Create full dataset
+        full_dataset = MultimodalDataset(
+            csv_path=config['data_csv'],
+            brainiac_model=brainiac_model,
+            protein_run_dir=config['protein_run_dir'],
+            protein_latents_dir=config.get('protein_latents_dir'),
+            protein_model_type=config['protein_model_type'],
+            protein_layer=config['protein_layer'],
+            device=device
         )
         
-        # Evaluate on test set
-        test_loss, test_acc, test_auc, test_cm, _, _, _ = evaluate(
+        # Create subset datasets for this fold
+        train_dataset = Subset(full_dataset, train_idx)
+        val_dataset = Subset(full_dataset, val_idx)
+        test_dataset = Subset(full_dataset, test_idx)
+        
+        # Create dataloaders
+        train_loader = DataLoader(train_dataset, batch_size=config['batch_size'], shuffle=True, num_workers=0)
+        val_loader = DataLoader(val_dataset, batch_size=config['batch_size'], shuffle=False, num_workers=0)
+        test_loader = DataLoader(test_dataset, batch_size=config['batch_size'], shuffle=False, num_workers=0)
+        
+        # Create fusion model (fresh for each fold)
+        print("\nCreating fusion model...")
+        torch.manual_seed(config['model_seed'])
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed(config['model_seed'])
+        
+        protein_dim = full_dataset.protein_dim
+        model = get_model(
+            protein_dim=protein_dim,
+            mri_dim=768,
+            hidden_dim=config['hidden_dim'],
+            dropout=config['dropout']
+        ).to(device)
+        
+        # Setup training with class weights to handle imbalance
+        # Calculate class weights from training data
+        df_full = pd.read_csv(config['data_csv'])
+        train_labels = (df_full.iloc[train_idx]['research_group'] == 'AD').astype(int).values
+        class_counts = np.bincount(train_labels)
+        class_weights = torch.FloatTensor(len(train_labels) / (len(class_counts) * class_counts)).to(device)
+        
+        print(f"Class distribution in training: CN={class_counts[0]}, AD={class_counts[1]}")
+        print(f"Class weights: CN={class_weights[0]:.3f}, AD={class_weights[1]:.3f}")
+        
+        criterion = nn.CrossEntropyLoss(weight=class_weights)
+        optimizer = optim.Adam(model.parameters(), lr=config['learning_rate'])
+        
+        # Track best model for this fold
+        # Use balanced accuracy for model selection (better for imbalanced data)
+        best_val_score = 0
+        best_epoch = 0
+        fold_history = {'train': [], 'val': [], 'test': []}
+        
+        # Training loop
+        print("\nTraining...")
+        for epoch in range(config['num_epochs']):
+            print(f"\nEpoch {epoch+1}/{config['num_epochs']}")
+            print("-" * 40)
+            
+            # Train
+            train_loss, train_acc, train_auc, train_cm, train_balanced_acc = train_one_epoch(
+                model, train_loader, criterion, optimizer, device
+            )
+            
+            # Validate
+            val_loss, val_acc, val_auc, val_cm, _, val_preds, val_labels = evaluate(
+                model, val_loader, criterion, device
+            )
+            
+            # Calculate balanced accuracy for validation (better for imbalanced data)
+            val_balanced_acc = balanced_accuracy_score(val_labels, val_preds)
+            
+            # Test (for monitoring only, not for model selection)
+            test_loss, test_acc, test_auc, test_cm, _, test_preds, test_labels = evaluate(
+                model, test_loader, criterion, device
+            )
+            test_balanced_acc = balanced_accuracy_score(test_labels, test_preds)
+            
+            # Store history
+            fold_history['train'].append({'loss': train_loss, 'acc': train_acc, 'auc': train_auc})
+            fold_history['val'].append({'loss': val_loss, 'acc': val_acc, 'auc': val_auc})
+            fold_history['test'].append({'loss': test_loss, 'acc': test_acc, 'auc': test_auc})
+            
+            # Print results
+            print_results("Train", train_loss, train_acc, train_auc, train_cm)
+            print(f"  Balanced Accuracy: {train_balanced_acc:.4f}")
+            print_results("Val", val_loss, val_acc, val_auc, val_cm)
+            print(f"  Balanced Accuracy: {val_balanced_acc:.4f}")
+            print_results("Test", test_loss, test_acc, test_auc, test_cm)
+            print(f"  Balanced Accuracy: {test_balanced_acc:.4f}")
+            
+            # Composite score: Use balanced accuracy + AUC for model selection
+            # This prevents models that predict only one class from being selected
+            val_composite_score = (val_balanced_acc + val_auc) / 2
+            
+            # Save best model based on composite score
+            if val_composite_score > best_val_score:
+                best_val_score = val_composite_score
+                best_epoch = epoch + 1
+                
+                torch.save({
+                    'fold': fold_idx,
+                    'epoch': epoch,
+                    'model_state_dict': model.state_dict(),
+                    'optimizer_state_dict': optimizer.state_dict(),
+                    'val_auc': val_auc,
+                    'val_acc': val_acc,
+                    'val_balanced_acc': val_balanced_acc,
+                    'val_composite_score': val_composite_score,
+                    'test_auc': test_auc,
+                    'test_acc': test_acc,
+                    'config': config
+                }, fold_dir / 'best_model.pth')
+                
+                print(f"  ✅ New best model! (Val Composite Score: {val_composite_score:.4f}, Bal Acc: {val_balanced_acc:.4f}, AUC: {val_auc:.4f})")
+        
+        # Load best model and evaluate on test set
+        print(f"\n{'='*40}")
+        print(f"Best epoch: {best_epoch} (Val Composite Score: {best_val_score:.4f})")
+        print(f"{'='*40}")
+        
+        checkpoint = torch.load(fold_dir / 'best_model.pth')
+        model.load_state_dict(checkpoint['model_state_dict'])
+        
+        # Final test evaluation
+        test_loss, test_acc, test_auc, test_cm, test_subjects, test_preds, test_labels = evaluate(
             model, test_loader, criterion, device
         )
         
-        # Print results
-        print_results("Train", train_loss, train_acc, train_auc, train_cm)
-        print_results("Test", test_loss, test_acc, test_auc, test_cm)
+        # Calculate precision, recall, F1, balanced accuracy
+        precision, recall, f1, _ = precision_recall_fscore_support(
+            test_labels, test_preds, average='binary', zero_division=0
+        )
+        test_final_balanced_acc = balanced_accuracy_score(test_labels, test_preds)
         
-        # Save best model
-        if test_auc > best_test_auc:
-            best_test_auc = test_auc
-            best_epoch = epoch + 1
-            
-            # Save model
-            save_dir = Path(config['save_dir'])
-            save_dir.mkdir(parents=True, exist_ok=True)
-            torch.save({
-                'epoch': epoch,
-                'model_state_dict': model.state_dict(),
-                'optimizer_state_dict': optimizer.state_dict(),
-                'test_auc': test_auc,
-                'test_acc': test_acc,
-                'config': config
-            }, save_dir / 'best_model.pth')
-            
-            print(f"  ✅ New best model saved! (AUC: {test_auc:.4f})")
+        # Store fold results
+        fold_result = {
+            'fold': fold_idx,
+            'best_epoch': best_epoch,
+            'val_composite_score': best_val_score,
+            'test_loss': test_loss,
+            'test_acc': test_acc,
+            'test_balanced_acc': test_final_balanced_acc,
+            'test_auc': test_auc,
+            'test_precision': precision,
+            'test_recall': recall,
+            'test_f1': f1,
+            'test_cm': test_cm.tolist(),
+            'n_train': len(train_idx),
+            'n_val': len(val_idx),
+            'n_test': len(test_idx)
+        }
+        fold_results.append(fold_result)
+        
+        # Save fold results
+        with open(fold_dir / 'results.json', 'w') as f:
+            json.dump(fold_result, f, indent=2)
+        
+        # Save predictions
+        pd.DataFrame({
+            'subject_id': test_subjects,
+            'true_label': test_labels,
+            'pred_label': test_preds
+        }).to_csv(fold_dir / 'predictions.csv', index=False)
+        
+        print(f"\nFold {fold_idx} Final Test Results:")
+        print_results("Test", test_loss, test_acc, test_auc, test_cm)
+        print(f"  Balanced Accuracy: {test_final_balanced_acc:.4f}")
+        print(f"  Precision: {precision:.4f}")
+        print(f"  Recall: {recall:.4f}")
+        print(f"  F1: {f1:.4f}")
     
-    # Final summary
+    # Aggregate results across folds
     print("\n" + "="*60)
-    print("TRAINING COMPLETE")
+    print("CROSS-VALIDATION RESULTS SUMMARY")
     print("="*60)
-    print(f"Best Test AUC: {best_test_auc:.4f} (Epoch {best_epoch})")
-    print(f"Model saved to: {config['save_dir']}/best_model.pth")
+    
+    metrics_to_aggregate = ['test_acc', 'test_balanced_acc', 'test_auc', 'test_precision', 'test_recall', 'test_f1']
+    aggregated = {}
+    
+    for metric in metrics_to_aggregate:
+        values = [f[metric] for f in fold_results]
+        aggregated[metric] = {
+            'mean': np.mean(values),
+            'std': np.std(values),
+            'values': values
+        }
+        metric_name = metric.replace('test_', '').replace('_', ' ').upper()
+        print(f"{metric_name}: {aggregated[metric]['mean']:.4f} ± {aggregated[metric]['std']:.4f}")
+    
+    # Aggregate confusion matrix
+    total_cm = np.sum([np.array(f['test_cm']) for f in fold_results], axis=0)
+    print(f"\nAggregated Confusion Matrix:")
+    print(f"  TN={total_cm[0,0]}, FP={total_cm[0,1]}")
+    print(f"  FN={total_cm[1,0]}, TP={total_cm[1,1]}")
+    
+    # Save aggregated results
+    aggregated_results = {
+        'config': config,
+        'fold_results': fold_results,
+        'aggregated_metrics': {k: {'mean': v['mean'], 'std': v['std']} for k, v in aggregated.items()},
+        'aggregated_cm': total_cm.tolist()
+    }
+    
+    with open(save_dir / 'aggregated_results.json', 'w') as f:
+        json.dump(aggregated_results, f, indent=2)
+    
+    print(f"\n✅ Cross-validation complete!")
+    print(f"Results saved to: {save_dir}")
 
 
 if __name__ == "__main__":
