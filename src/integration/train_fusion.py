@@ -170,9 +170,9 @@ def train_one_epoch(model, dataloader, criterion, optimizer, device):
     
     # Calculate AUC
     if n_unique_labels < 2:
-        # Single class in labels - AUC undefined
-        print(f"  ⚠️  Warning: Only one class in labels - AUC undefined, setting to 0.5")
-        auc = 0.5
+        # Single class in labels - AUC undefined (data issue)
+        print(f"  ⚠️  Warning: Only one class in labels - AUC undefined (data issue)")
+        auc = float('nan')  # Use NaN to indicate undefined
     elif n_unique_preds < 2:
         # Model predicting only one class - AUC is 0.5 (random chance)
         print(f"  ⚠️  Warning: Model predicting only ONE class - Using AUC = 0.5 (random chance)")
@@ -182,7 +182,8 @@ def train_one_epoch(model, dataloader, criterion, optimizer, device):
             auc = roc_auc_score(all_labels, all_probs)
         except ValueError as e:
             print(f"  ⚠️  Warning: AUC calculation failed - {e}")
-            auc = 0.5
+            auc = float('nan')  # Use NaN to indicate calculation error
+
     
     cm = confusion_matrix(all_labels, all_preds, labels=[0, 1])
     balanced_acc = balanced_accuracy_score(all_true_labels, all_preds)
@@ -228,9 +229,9 @@ def evaluate(model, dataloader, criterion, device):
     
     # Calculate AUC
     if n_unique_labels < 2:
-        # Single class in labels - AUC undefined
-        print(f"  ⚠️  Warning: Only one class in labels - AUC undefined, setting to 0.5")
-        auc = 0.5
+        # Single class in labels - AUC undefined (data issue)
+        print(f"  ⚠️  Warning: Only one class in labels - AUC undefined (data issue)")
+        auc = float('nan')  # Use NaN to indicate undefined
     elif n_unique_preds < 2:
         # Model predicting only one class - AUC is 0.5 (random chance)
         print(f"  ⚠️  Warning: Model predicting only ONE class - Using AUC = 0.5 (random chance)")
@@ -240,7 +241,7 @@ def evaluate(model, dataloader, criterion, device):
             auc = roc_auc_score(all_labels, all_probs)
         except ValueError as e:
             print(f"  ⚠️  Warning: AUC calculation failed - {e}")
-            auc = 0.5
+            auc = float('nan')  # Use NaN to indicate calculation error
     
     # Confusion matrix
     cm = confusion_matrix(all_labels, all_preds, labels=[0, 1])
@@ -254,7 +255,10 @@ def print_results(split_name, loss, acc, auc=None, cm=None):
     print(f"  Loss: {loss:.4f}")
     print(f"  Accuracy: {acc:.4f}")
     if auc is not None:
-        print(f"  AUC: {auc:.4f}")
+        if np.isnan(auc):
+            print(f"  AUC: undefined")
+        else:
+            print(f"  AUC: {auc:.4f}")
     if cm is not None:
         print(f"  Confusion Matrix:")
         print(f"    TN={cm[0,0]}, FP={cm[0,1]}")
@@ -446,7 +450,12 @@ def main():
             
             # Composite score: Use balanced accuracy + AUC for model selection
             # This prevents models that predict only one class from being selected
-            val_composite_score = (val_balanced_acc + val_auc) / 2
+            # Handle NaN AUC values (undefined or error)
+            if np.isnan(val_auc):
+                val_composite_score = val_balanced_acc  # Use only balanced accuracy if AUC is undefined
+                print(f"  ⚠️  Using only balanced accuracy for model selection (AUC is undefined)")
+            else:
+                val_composite_score = (val_balanced_acc + val_auc) / 2
             
             # Save best model based on composite score
             if val_composite_score > best_val_score:
@@ -535,13 +544,36 @@ def main():
     
     for metric in metrics_to_aggregate:
         values = [f[metric] for f in fold_results]
-        aggregated[metric] = {
-            'mean': np.mean(values),
-            'std': np.std(values),
-            'values': values
-        }
-        metric_name = metric.replace('test_', '').replace('_', ' ').upper()
-        print(f"{metric_name}: {aggregated[metric]['mean']:.4f} ± {aggregated[metric]['std']:.4f}")
+        
+        # Handle NaN values (e.g., undefined AUC)
+        if metric == 'test_auc' and any(np.isnan(v) for v in values):
+            # If any fold has NaN AUC, report as undefined
+            aggregated[metric] = {
+                'mean': float('nan'),
+                'std': float('nan'),
+                'values': values
+            }
+            metric_name = metric.replace('test_', '').replace('_', ' ').upper()
+            print(f"{metric_name}: undefined (some folds had undefined AUC)")
+        else:
+            # Filter out NaN values for calculation
+            valid_values = [v for v in values if not np.isnan(v)]
+            if valid_values:
+                aggregated[metric] = {
+                    'mean': np.mean(valid_values),
+                    'std': np.std(valid_values),
+                    'values': values
+                }
+                metric_name = metric.replace('test_', '').replace('_', ' ').upper()
+                print(f"{metric_name}: {aggregated[metric]['mean']:.4f} ± {aggregated[metric]['std']:.4f}")
+            else:
+                aggregated[metric] = {
+                    'mean': float('nan'),
+                    'std': float('nan'),
+                    'values': values
+                }
+                metric_name = metric.replace('test_', '').replace('_', ' ').upper()
+                print(f"{metric_name}: undefined (all folds had undefined values)")
     
     # Aggregate confusion matrix
     total_cm = np.sum([np.array(f['test_cm']) for f in fold_results], axis=0)
