@@ -285,13 +285,13 @@ def main():
         'protein_latents_dir': None,
         
         # Model config
-        'protein_model_type': 'transformer',  # 'mlp' or 'transformer'
-        'protein_layer': 'transformer_embeddings',  # 'hidden_layer_2' for MLP, 'transformer_embeddings' for Transformer
+        'protein_model_type': 'mlp',  # 'mlp' or 'transformer'
+        'protein_layer': 'hidden_layer_2',  # 'hidden_layer_2' for MLP, 'transformer_embeddings' for Transformer
         'hidden_dim': 128, #params for the fusion model
         'dropout': 0.3, #params for the fusion model
         
         # Cross-validation config
-        'n_folds': 2,
+        'n_folds': 5,
         'split_ratio': (0.6, 0.2, 0.2),  # train:val:test
         'cv_seed': 42,
         
@@ -302,9 +302,10 @@ def main():
         'model_seed': 42,
         'device': 'cuda' if torch.cuda.is_available() else 'cpu',
         
-        # Save config
-        'save_dir': f'/home/ssim0068/multimodal-AD/runs/cv_{datetime.now().strftime("%Y%m%d_%H%M%S")}'
     }
+    
+    # Create meaningful save directory name with model info
+    config['save_dir'] = f'/home/ssim0068/multimodal-AD/runs/fusion_{config["protein_model_type"]}_{config["n_folds"]}fold_cv'
     
     print("="*60)
     print("MULTIMODAL FUSION TRAINING - CROSS-VALIDATION")
@@ -365,6 +366,31 @@ def main():
         split_ratio=config['split_ratio'],
         random_state=config['cv_seed']
     )
+    
+    # Save CV splits (indices) for reuse in unimodal baselines
+    splits_serializable = [
+        {
+            'train': train_idx.tolist(),
+            'val': val_idx.tolist(),
+            'test': test_idx.tolist()
+        }
+        for (train_idx, val_idx, test_idx) in cv_splits
+    ]
+    with open(save_dir / 'cv_splits.json', 'w') as f:
+        json.dump(splits_serializable, f, indent=2)
+    
+    # Save subject lists for each split (once at top level)
+    try:
+        df_full = pd.read_csv(config['data_csv'])
+        split_cols = [c for c in ['RID', 'Subject', 'research_group'] if c in df_full.columns]
+        
+        for fold_idx, (train_idx, val_idx, test_idx) in enumerate(cv_splits):
+            fold_name = f'fold_{fold_idx}'
+            pd.DataFrame(df_full.iloc[train_idx][split_cols]).to_csv(save_dir / f'{fold_name}_train_split.csv', index=False)
+            pd.DataFrame(df_full.iloc[val_idx][split_cols]).to_csv(save_dir / f'{fold_name}_val_split.csv', index=False)
+            pd.DataFrame(df_full.iloc[test_idx][split_cols]).to_csv(save_dir / f'{fold_name}_test_split.csv', index=False)
+    except Exception as e:
+        print(f"  Warning: could not save split subject CSVs: {e}")
     
     # Track results across folds
     fold_results = []
