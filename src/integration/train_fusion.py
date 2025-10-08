@@ -14,6 +14,8 @@ from sklearn.metrics import accuracy_score, roc_auc_score, confusion_matrix, pre
 from sklearn.model_selection import StratifiedKFold, train_test_split
 import sys
 import json
+import wandb
+import os
 from datetime import datetime
 
 # Add paths
@@ -170,11 +172,11 @@ def train_one_epoch(model, dataloader, criterion, optimizer, device):
     
     # Calculate AUC
     if n_unique_labels < 2:
-        # Single class in labels - AUC undefined (data issue)
+        # Single class in labels - AUC undefined (data split issue)
         print(f"  ⚠️  Warning: Only one class in labels - AUC undefined (data issue)")
         auc = float('nan')  # Use NaN to indicate undefined
     elif n_unique_preds < 2:
-        # Model predicting only one class - AUC is 0.5 (random chance)
+        # Model predicting only one class - AUC is 0.5 
         print(f"  ⚠️  Warning: Model predicting only ONE class - Using AUC = 0.5 (random chance)")
         auc = 0.5
     else:
@@ -229,11 +231,11 @@ def evaluate(model, dataloader, criterion, device):
     
     # Calculate AUC
     if n_unique_labels < 2:
-        # Single class in labels - AUC undefined (data issue)
+        # Single class in labels - AUC undefined (data split issue)
         print(f"  ⚠️  Warning: Only one class in labels - AUC undefined (data issue)")
         auc = float('nan')  # Use NaN to indicate undefined
     elif n_unique_preds < 2:
-        # Model predicting only one class - AUC is 0.5 (random chance)
+        # Model predicting only one class - AUC is 0.5 
         print(f"  ⚠️  Warning: Model predicting only ONE class - Using AUC = 0.5 (random chance)")
         auc = 0.5
     else:
@@ -329,6 +331,27 @@ def main():
     # Save config
     with open(save_dir / 'config.json', 'w') as f:
         json.dump(config, f, indent=2)
+    
+    # Initialize wandb
+    wandb_config = {
+        # Add wandb configuration
+        'use_wandb': config.get('use_wandb', True),
+        'wandb_project': config.get('wandb_project', 'multimodal-ad'),
+        'wandb_entity': config.get('wandb_entity', None),
+        'wandb_group': config.get('wandb_group', f"cv_{datetime.now().strftime('%Y%m%d_%H%M%S')}"),
+    }
+    
+    # Add wandb config to main config
+    config.update(wandb_config)
+    
+    # Initialize wandb config but don't start a run yet
+    if config['use_wandb']:
+        print("Weights & Biases logging enabled")
+        print(f"W&B Project: {config['wandb_project']}")
+        print(f"W&B Group: {config['wandb_group']}")
+        # We'll initialize runs for each fold and for the final summary
+    else:
+        print("Weights & Biases logging disabled")
     
     # Load BrainIAC model once (shared across all folds)
     print("Loading BrainIAC model...")
@@ -436,9 +459,13 @@ def main():
             test_balanced_acc = balanced_accuracy_score(test_labels, test_preds)
             
             # Store history
-            fold_history['train'].append({'loss': train_loss, 'acc': train_acc, 'auc': train_auc})
-            fold_history['val'].append({'loss': val_loss, 'acc': val_acc, 'auc': val_auc})
-            fold_history['test'].append({'loss': test_loss, 'acc': test_acc, 'auc': test_auc})
+            train_metrics = {'loss': train_loss, 'acc': train_acc, 'auc': train_auc, 'balanced_acc': train_balanced_acc}
+            val_metrics = {'loss': val_loss, 'acc': val_acc, 'auc': val_auc, 'balanced_acc': val_balanced_acc}
+            test_metrics = {'loss': test_loss, 'acc': test_acc, 'auc': test_auc, 'balanced_acc': test_balanced_acc}
+            
+            fold_history['train'].append(train_metrics)
+            fold_history['val'].append(val_metrics)
+            fold_history['test'].append(test_metrics)
             
             # Print results
             print_results("Train", train_loss, train_acc, train_auc, train_cm)
@@ -447,6 +474,62 @@ def main():
             print(f"  Balanced Accuracy: {val_balanced_acc:.4f}")
             print_results("Test", test_loss, test_acc, test_auc, test_cm)
             print(f"  Balanced Accuracy: {test_balanced_acc:.4f}")
+            
+            # Log metrics to wandb
+            if config['use_wandb']:
+                # Initialize wandb for this fold's training if not already initialized
+                if wandb.run is None:
+                    fold_run_name = f"fusion_{config['protein_model_type']}_fold{fold_idx}_training"
+                    wandb.init(
+                        project=config['wandb_project'],
+                        entity=config['wandb_entity'],
+                        group=config['wandb_group'],
+                        name=fold_run_name,
+                        config={k: v for k, v in config.items() if k != 'wandb_entity'},
+                        reinit=True
+                    )
+                
+                # Prepare metrics for logging
+                wandb_metrics = {
+                    f"train/loss": train_loss,
+                    f"train/acc": train_acc,
+                    f"train/balanced_acc": train_balanced_acc,
+                    f"val/loss": val_loss,
+                    f"val/acc": val_acc,
+                    f"val/balanced_acc": val_balanced_acc,
+                    f"test/loss": test_loss,
+                    f"test/acc": test_acc,
+                    f"test/balanced_acc": test_balanced_acc,
+                    "epoch": epoch
+                }
+                
+                # Only log AUC if it's not NaN
+                if not np.isnan(train_auc):
+                    wandb_metrics[f"train/auc"] = train_auc
+                if not np.isnan(val_auc):
+                    wandb_metrics[f"val/auc"] = val_auc
+                if not np.isnan(test_auc):
+                    wandb_metrics[f"test/auc"] = test_auc
+                
+                # Log confusion matrix as image
+                if config.get('log_confusion_matrices', True) and epoch % 5 == 0:  # Log every 5 epochs to reduce clutter
+                    try:
+                        import matplotlib.pyplot as plt
+                        import seaborn as sns
+                        
+                        # Create confusion matrix plots
+                        fig, ax = plt.subplots(figsize=(8, 6))
+                        sns.heatmap(val_cm, annot=True, fmt='d', cmap='Blues', ax=ax)
+                        ax.set_xlabel('Predicted')
+                        ax.set_ylabel('True')
+                        ax.set_title(f'Validation Confusion Matrix (Epoch {epoch+1})')
+                        wandb_metrics[f"val/confusion_matrix"] = wandb.Image(fig)
+                        plt.close(fig)
+                    except ImportError:
+                        print("  Warning: matplotlib/seaborn not available for confusion matrix visualization")
+                
+                # Log metrics
+                wandb.log(wandb_metrics)
             
             # Composite score: Use balanced accuracy + AUC for model selection
             # This prevents models that predict only one class from being selected
@@ -521,11 +604,12 @@ def main():
             json.dump(fold_result, f, indent=2)
         
         # Save predictions
-        pd.DataFrame({
+        predictions_df = pd.DataFrame({
             'subject_id': test_subjects,
             'true_label': test_labels,
             'pred_label': test_preds
-        }).to_csv(fold_dir / 'predictions.csv', index=False)
+        })
+        predictions_df.to_csv(fold_dir / 'predictions.csv', index=False)
         
         print(f"\nFold {fold_idx} Final Test Results:")
         print_results("Test", test_loss, test_acc, test_auc, test_cm)
@@ -533,6 +617,82 @@ def main():
         print(f"  Precision: {precision:.4f}")
         print(f"  Recall: {recall:.4f}")
         print(f"  F1: {f1:.4f}")
+        
+        # Log fold results to wandb
+        if config['use_wandb']:
+            # Create a new run for this fold's final results
+            if wandb.run is not None:
+                wandb.finish()
+            
+            fold_run_name = f"fusion_{config['protein_model_type']}_fold{fold_idx}"
+            wandb.init(
+                project=config['wandb_project'],
+                entity=config['wandb_entity'],
+                group=config['wandb_group'],
+                name=fold_run_name,
+                config={k: v for k, v in config.items() if k != 'wandb_entity'},
+                reinit=True
+            )
+            
+            # Log fold metrics
+            fold_metrics = {
+                "fold": fold_idx,
+                "best_epoch": best_epoch,
+                "val_composite_score": best_val_score,
+                "test/loss": test_loss,
+                "test/accuracy": test_acc,
+                "test/balanced_accuracy": test_final_balanced_acc,
+                "test/precision": precision,
+                "test/recall": recall,
+                "test/f1": f1,
+            }
+            
+            # Only log AUC if it's not NaN
+            if not np.isnan(test_auc):
+                fold_metrics["test/auc"] = test_auc
+            
+            wandb.log(fold_metrics)
+            
+            # Log confusion matrix
+            try:
+                import matplotlib.pyplot as plt
+                import seaborn as sns
+                
+                # Create confusion matrix plot
+                fig, ax = plt.subplots(figsize=(8, 6))
+                sns.heatmap(test_cm, annot=True, fmt='d', cmap='Blues', ax=ax)
+                ax.set_xlabel('Predicted')
+                ax.set_ylabel('True')
+                ax.set_title(f'Test Confusion Matrix (Fold {fold_idx})')
+                wandb.log({"test/confusion_matrix": wandb.Image(fig)})
+                plt.close(fig)
+                
+                # Create ROC curve if AUC is valid
+                if not np.isnan(test_auc) and len(np.unique(test_labels)) > 1:
+                    from sklearn.metrics import roc_curve
+                    # Get probabilities for positive class
+                    test_probs = torch.softmax(model(torch.tensor(test_dataset.dataset.get_fused_features(test_dataset.indices)).to(device)), dim=1)[:, 1].detach().cpu().numpy()
+                    fpr, tpr, _ = roc_curve(test_labels, test_probs)
+                    
+                    fig, ax = plt.subplots(figsize=(8, 6))
+                    ax.plot(fpr, tpr, label=f'ROC curve (AUC = {test_auc:.3f})')
+                    ax.plot([0, 1], [0, 1], 'k--')
+                    ax.set_xlim([0.0, 1.0])
+                    ax.set_ylim([0.0, 1.05])
+                    ax.set_xlabel('False Positive Rate')
+                    ax.set_ylabel('True Positive Rate')
+                    ax.set_title(f'ROC Curve (Fold {fold_idx})')
+                    ax.legend(loc="lower right")
+                    wandb.log({"test/roc_curve": wandb.Image(fig)})
+                    plt.close(fig)
+            except Exception as e:
+                print(f"  Warning: Could not create visualizations for wandb: {e}")
+            
+            # Log predictions as a table
+            wandb.log({"test/predictions": wandb.Table(dataframe=predictions_df)})
+            
+            # Finish the fold run
+            wandb.finish()
     
     # Aggregate results across folds
     print("\n" + "="*60)
@@ -592,8 +752,95 @@ def main():
     with open(save_dir / 'aggregated_results.json', 'w') as f:
         json.dump(aggregated_results, f, indent=2)
     
+    # Log aggregated results to wandb
+    if config['use_wandb']:
+        # Create a new run for aggregated results
+        if wandb.run is not None:
+            wandb.finish()
+        
+        # Initialize the final summary run
+        wandb.init(
+            project=config['wandb_project'],
+            entity=config['wandb_entity'],
+            group=config['wandb_group'],
+            name=f"fusion_{config['protein_model_type']}_{config['n_folds']}fold_cv_summary",
+            config={k: v for k, v in config.items() if k != 'wandb_entity'},
+            reinit=True
+        )
+        
+        # Log aggregated metrics
+        summary_metrics = {}
+        for metric, values in aggregated.items():
+            if not np.isnan(values['mean']):
+                metric_name = metric.replace('test_', '').replace('_', ' ')
+                summary_metrics[f"summary/{metric_name}/mean"] = values['mean']
+                summary_metrics[f"summary/{metric_name}/std"] = values['std']
+        
+        # Log confusion matrix
+        try:
+            import matplotlib.pyplot as plt
+            import seaborn as sns
+            
+            # Create aggregated confusion matrix plot
+            fig, ax = plt.subplots(figsize=(8, 6))
+            sns.heatmap(total_cm, annot=True, fmt='d', cmap='Blues', ax=ax)
+            ax.set_xlabel('Predicted')
+            ax.set_ylabel('True')
+            ax.set_title(f'Aggregated Confusion Matrix ({config["n_folds"]}-fold CV)')
+            summary_metrics["summary/confusion_matrix"] = wandb.Image(fig)
+            plt.close(fig)
+            
+            # Create bar chart of metrics across folds
+            metrics_to_plot = ['test_acc', 'test_balanced_acc', 'test_f1']
+            metrics_to_plot = [m for m in metrics_to_plot if m in aggregated]
+            
+            if metrics_to_plot:
+                fig, ax = plt.subplots(figsize=(10, 6))
+                x = np.arange(len(metrics_to_plot))
+                means = [aggregated[m]['mean'] for m in metrics_to_plot]
+                stds = [aggregated[m]['std'] for m in metrics_to_plot]
+                
+                ax.bar(x, means, yerr=stds, alpha=0.7, capsize=10)
+                ax.set_xticks(x)
+                ax.set_xticklabels([m.replace('test_', '').replace('_', ' ').title() for m in metrics_to_plot])
+                ax.set_ylabel('Score')
+                ax.set_title(f'Performance Metrics ({config["n_folds"]}-fold CV)')
+                ax.set_ylim(0, 1)
+                
+                for i, v in enumerate(means):
+                    ax.text(i, v + 0.05, f'{v:.3f}±{stds[i]:.3f}', ha='center')
+                
+                summary_metrics["summary/metrics_comparison"] = wandb.Image(fig)
+                plt.close(fig)
+        except Exception as e:
+            print(f"  Warning: Could not create visualizations for wandb: {e}")
+        
+        # Log all metrics
+        wandb.log(summary_metrics)
+        
+        # Create a summary table with all fold results
+        fold_summary = []
+        for fold_idx, fold in enumerate(fold_results):
+            fold_summary.append({
+                'Fold': fold_idx,
+                'Best Epoch': fold['best_epoch'],
+                'Accuracy': f"{fold['test_acc']:.4f}",
+                'Balanced Acc': f"{fold['test_balanced_acc']:.4f}",
+                'AUC': f"{fold['test_auc']:.4f}" if not np.isnan(fold['test_auc']) else "undefined",
+                'F1': f"{fold['test_f1']:.4f}",
+                'Precision': f"{fold['test_precision']:.4f}",
+                'Recall': f"{fold['test_recall']:.4f}"
+            })
+        
+        wandb.log({"summary/fold_results": wandb.Table(data=fold_summary)})
+        
+        # Finish the run
+        wandb.finish()
+    
     print(f"\n✅ Cross-validation complete!")
     print(f"Results saved to: {save_dir}")
+    if config['use_wandb']:
+        print(f"Experiment logged to W&B: {config['wandb_project']}/{config['wandb_group']}")
 
 
 if __name__ == "__main__":
