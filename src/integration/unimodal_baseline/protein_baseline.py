@@ -282,7 +282,19 @@ def main(args):
                      'mri_source_path', 'mri_path']
     protein_cols = [col for col in df.columns if col not in metadata_cols]
     
-    X = df[protein_cols].values
+    # Impute missing values with column medians and remove zero-variance features
+    protein_df = df[protein_cols].copy()
+    
+    # Imputation (median per column)
+    protein_df = protein_df.fillna(protein_df.median(numeric_only=True))
+    
+    # Zero-variance removal
+    zero_var_cols = protein_df.columns[(protein_df.var(axis=0) == 0)].tolist()
+    if zero_var_cols:
+        print(f"  Removing {len(zero_var_cols)} zero-variance features")
+        protein_df = protein_df.drop(columns=zero_var_cols)
+    
+    X = protein_df.values
     y = (df['research_group'] == 'AD').astype(int).values
     
     print(f"  Loaded {len(X)} samples with {X.shape[1]} protein features")
