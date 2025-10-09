@@ -147,16 +147,16 @@ def evaluate_fold_test(model, scaler, X_test, y_test, fold_idx, model_type='mlp'
     
     if n_unique_labels < 2:
         test_auc = float('nan')
-        print(f"  ⚠️  Warning: Only one class in test labels - AUC undefined")
+        print("  Warning: Only one class in test labels - AUC undefined")
     elif n_unique_preds < 2:
         test_auc = 0.5
-        print(f"  ⚠️  Warning: Model predicting only ONE class - Using AUC = 0.5")
+        print("  Warning: Model predicting only ONE class - Using AUC = 0.5")
     else:
         try:
             test_auc = roc_auc_score(y_test, test_probs)
         except ValueError:
             test_auc = float('nan')
-            print(f"  ⚠️  Warning: AUC calculation failed")
+            print("  Warning: AUC calculation failed")
     
     test_cm = confusion_matrix(y_test, test_preds, labels=[0, 1])
     
