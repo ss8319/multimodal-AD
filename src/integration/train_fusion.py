@@ -173,17 +173,17 @@ def train_one_epoch(model, dataloader, criterion, optimizer, device):
     # Calculate AUC
     if n_unique_labels < 2:
         # Single class in labels - AUC undefined (data split issue)
-        print(f"  ⚠️  Warning: Only one class in labels - AUC undefined (data issue)")
+        print("  Warning: Only one class in labels - AUC undefined (data issue)")
         auc = float('nan')  # Use NaN to indicate undefined
     elif n_unique_preds < 2:
         # Model predicting only one class - AUC is 0.5 
-        print(f"  ⚠️  Warning: Model predicting only ONE class - Using AUC = 0.5 (random chance)")
+        print("  Warning: Model predicting only ONE class - Using AUC = 0.5 (random chance)")
         auc = 0.5
     else:
         try:
             auc = roc_auc_score(all_labels, all_probs)
         except ValueError as e:
-            print(f"  ⚠️  Warning: AUC calculation failed - {e}")
+            print(f"  Warning: AUC calculation failed - {e}")
             auc = float('nan')  # Use NaN to indicate calculation error
 
     
@@ -232,17 +232,17 @@ def evaluate(model, dataloader, criterion, device):
     # Calculate AUC
     if n_unique_labels < 2:
         # Single class in labels - AUC undefined (data split issue)
-        print(f"  ⚠️  Warning: Only one class in labels - AUC undefined (data issue)")
+        print("  Warning: Only one class in labels - AUC undefined (data issue)")
         auc = float('nan')  # Use NaN to indicate undefined
     elif n_unique_preds < 2:
         # Model predicting only one class - AUC is 0.5 
-        print(f"  ⚠️  Warning: Model predicting only ONE class - Using AUC = 0.5 (random chance)")
+        print("  Warning: Model predicting only ONE class - Using AUC = 0.5 (random chance)")
         auc = 0.5
     else:
         try:
             auc = roc_auc_score(all_labels, all_probs)
         except ValueError as e:
-            print(f"  ⚠️  Warning: AUC calculation failed - {e}")
+            print(f"  Warning: AUC calculation failed - {e}")
             auc = float('nan')  # Use NaN to indicate calculation error
     
     # Confusion matrix
@@ -562,7 +562,7 @@ def main():
             # Handle NaN AUC values (undefined or error)
             if np.isnan(val_auc):
                 val_composite_score = val_balanced_acc  # Use only balanced accuracy if AUC is undefined
-                print(f"  ⚠️  Using only balanced accuracy for model selection (AUC is undefined)")
+                print("  Using only balanced accuracy for model selection (AUC is undefined)")
             else:
                 val_composite_score = (val_balanced_acc + val_auc) / 2
             
