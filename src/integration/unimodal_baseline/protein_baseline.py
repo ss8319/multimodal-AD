@@ -22,6 +22,15 @@ from sklearn.metrics import (
     precision_recall_fscore_support,
     balanced_accuracy_score
 )
+from pathlib import Path
+
+# Feature alignment helper
+import sys as _sys
+from pathlib import Path as _P
+_protein_mod_path = str(_P(__file__).parent.parent.parent / "protein")
+if _protein_mod_path not in _sys.path:
+    _sys.path.insert(0, _protein_mod_path)
+from feature_utils import align_features_to_scaler, load_scaler_feature_columns
 
 
 def load_cv_splits(cv_splits_path):
@@ -293,6 +302,12 @@ def main(args):
     if zero_var_cols:
         print(f"  Removing {len(zero_var_cols)} zero-variance features")
         protein_df = protein_df.drop(columns=zero_var_cols)
+    
+    # Align to scaler's training feature order if available
+    scaler_features = load_scaler_feature_columns(Path(args.model_path).parents[1]) if args.model_type == 'mlp' else load_scaler_feature_columns(Path(args.scaler_path).parents[0])
+    # Note: For both models, scaler is saved in the run dir; attempt to resolve from provided paths
+    if scaler_features:
+        protein_df = align_features_to_scaler(protein_df, scaler, scaler_features)
     
     X = protein_df.values
     y = (df['research_group'] == 'AD').astype(int).values

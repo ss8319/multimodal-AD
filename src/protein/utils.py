@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 import pickle
 import torch
+import json
 from datetime import datetime
 from pathlib import Path
 from sklearn.model_selection import StratifiedKFold
@@ -339,6 +340,18 @@ def save_all_models(classifiers, results_df, X_train_raw, y_train, X_test, y_tes
     with open(scaler_path, 'wb') as f:
         pickle.dump(scaler, f)
     print(f"   Saved scaler: {scaler_path.name}")
+    
+    # Also save the exact training feature order next to the scaler
+    try:
+        feature_columns = list(X_train_raw.columns)
+        scaler_features_path = Path(run_dir) / "scaler_features.json"
+        with open(scaler_features_path, 'w') as f:
+            json.dump({
+                'feature_columns': feature_columns
+            }, f, indent=2)
+        print(f"   Saved scaler features: {scaler_features_path.name} ({len(feature_columns)} columns)")
+    except Exception as e:
+        print(f"   Warning: Could not save scaler feature columns: {e}")
     
     for clf_name, clf in classifiers.items():
         try:

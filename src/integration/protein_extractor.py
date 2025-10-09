@@ -4,6 +4,7 @@ Extracts latents from trained protein models (MLPClassifier or ProteinTransforme
 """
 
 import torch
+import pandas as pd
 import numpy as np
 import pickle
 from pathlib import Path
@@ -18,6 +19,11 @@ try:
 except ImportError:
     ProteinTransformer = None
 
+# Feature alignment utilities
+try:
+    from src.protein.feature_utils import align_features_to_scaler, load_scaler_feature_columns
+except ImportError:
+    from protein.feature_utils import align_features_to_scaler, load_scaler_feature_columns
 
 class ProteinLatentExtractor:
     """
@@ -40,9 +46,14 @@ class ProteinLatentExtractor:
             with open(scaler_path, 'rb') as f:
                 self.scaler = pickle.load(f)
             print(f"  Loaded protein scaler from {scaler_path}")
+            # Load saved training feature order for alignment
+            self.scaler_feature_columns = load_scaler_feature_columns(self.run_dir)
+            if self.scaler_feature_columns:
+                print(f"  Loaded scaler feature columns ({len(self.scaler_feature_columns)})")
         else:
             print(f"  No scaler found - will use raw protein values")
             self.scaler = None
+            self.scaler_feature_columns = None
         
         # Initialize models (will be loaded on demand)
         self.mlp_model = None
@@ -99,12 +110,13 @@ class ProteinLatentExtractor:
         print(f"  Loaded Transformer model from {model_path}")
         return self.transformer_model
     
-    def preprocess_protein_data(self, protein_values):
+    def preprocess_protein_data(self, protein_values, feature_names=None):
         """
         Preprocess protein data using the same scaler used during training
         
         Args:
             protein_values: Raw protein values [n_features]
+            feature_names: Optional list of feature names for alignment
         
         Returns:
             Scaled protein values
@@ -114,12 +126,28 @@ class ProteinLatentExtractor:
             print("  Warning: No scaler found, using raw protein values")
             return protein_values
         
-        # Reshape for scaler (expects 2D array)
+        # If we have saved training feature columns and (ideally) names, align
+        if self.scaler_feature_columns is not None and len(self.scaler_feature_columns) > 0:
+            # Build a single-row DataFrame with provided names if available
+            if feature_names is not None and len(feature_names) == len(protein_values):
+                df = pd.DataFrame([protein_values], columns=list(feature_names))
+            else:
+                # Fallback: create DataFrame with current columns; if lengths mismatch, revert to direct transform
+                try:
+                    df = pd.DataFrame([protein_values], columns=self.scaler_feature_columns[:len(protein_values)])
+                except Exception:
+                    df = None
+            if df is not None:
+                aligned = align_features_to_scaler(df, self.scaler, self.scaler_feature_columns)
+                scaled_values = self.scaler.transform(aligned)
+                return scaled_values.flatten()
+        
+        # Final fallback: Reshape and transform without alignment
         protein_values_2d = protein_values.reshape(1, -1)
         scaled_values = self.scaler.transform(protein_values_2d)
         return scaled_values.flatten()
     
-    def extract_mlp_latents(self, protein_values, layer_name='hidden_layer_2'):
+    def extract_mlp_latents(self, protein_values, layer_name='hidden_layer_2', feature_names=None):
         """
         Extract latents from MLPClassifier model
         
@@ -134,7 +162,7 @@ class ProteinLatentExtractor:
         model = self.load_mlp_model()
         
         # Preprocess data
-        X_scaled = self.preprocess_protein_data(protein_values)
+        X_scaled = self.preprocess_protein_data(protein_values, feature_names)
         
         # Extract features from hidden layers
         # MLPClassifier stores weights in coefs_ and intercepts_
@@ -155,7 +183,7 @@ class ProteinLatentExtractor:
         
         return layer_output.astype(np.float32)
     
-    def extract_transformer_latents(self, protein_values, layer_name='transformer_embeddings'):
+    def extract_transformer_latents(self, protein_values, layer_name='transformer_embeddings', feature_names=None):
         """
         Extract latents from ProteinTransformer model
         
@@ -170,7 +198,7 @@ class ProteinLatentExtractor:
         model = self.load_transformer_model()
         
         # Preprocess data
-        X_scaled = self.preprocess_protein_data(protein_values)
+        X_scaled = self.preprocess_protein_data(protein_values, feature_names)
         
         # Convert to tensor
         X_tensor = torch.FloatTensor(X_scaled).unsqueeze(0).to(self.device)  # [1, n_features]

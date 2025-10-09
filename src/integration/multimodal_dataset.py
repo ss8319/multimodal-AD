@@ -149,9 +149,13 @@ class MultimodalDataset(Dataset):
             row = self.df.iloc[idx]
             protein_values = row[self.protein_columns].values.astype(np.float32)
             if self.protein_model_type == 'mlp':
-                protein_latents = self.protein_extractor.extract_mlp_latents(protein_values, self.protein_layer)
+                protein_latents = self.protein_extractor.extract_mlp_latents(
+                    protein_values, self.protein_layer, feature_names=self.protein_columns
+                )
             else:  # transformer
-                protein_latents = self.protein_extractor.extract_transformer_latents(protein_values, self.protein_layer)
+                protein_latents = self.protein_extractor.extract_transformer_latents(
+                    protein_values, self.protein_layer, feature_names=self.protein_columns
+                )
             return protein_latents
         else:
             # Return raw protein values
