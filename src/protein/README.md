@@ -24,8 +24,8 @@ uv run python src/protein/main.py
 
 # Custom data paths
 uv run python src/protein/main.py \
-  --train-data 'src\data\protein\proteomic_encoder_train.csv' \
-  --test-data 'src\data\protein\proteomic_encoder_test.csv' \
+  --train-data 'src/data\protein/proteomic_encoder_train.csv' \
+  --test-data 'src/data/protein/proteomic_encoder_test.csv' \
   --save-models
 
 # Change CV folds
