@@ -125,8 +125,23 @@ def evaluate_model_cv(clf, X_train_raw, y_train, X_test, y_test, cv_splitter, cl
             if hasattr(fold_clf, 'predict_proba'):
                 val_proba = fold_clf.predict_proba(np.asarray(X_val_fold))
                 if val_proba is not None and not np.isnan(val_proba).any():
-                    cv_auc = roc_auc_score(y_val_fold, val_proba[:, 1])
-                    cv_auc_scores.append(cv_auc)
+                    # Check AUC conditions
+                    n_unique_labels = len(np.unique(y_val_fold))
+                    n_unique_preds = len(np.unique(val_pred))
+                    
+                    if n_unique_labels < 2:
+                        cv_auc_scores.append(float('nan'))
+                        print("  Warning: Only one class in validation labels - AUC undefined")
+                    elif n_unique_preds < 2:
+                        cv_auc_scores.append(0.5)
+                        print("  Warning: Model predicting only ONE class - Using AUC = 0.5")
+                    else:
+                        try:
+                            cv_auc = roc_auc_score(y_val_fold, val_proba[:, 1])
+                            cv_auc_scores.append(cv_auc)
+                        except ValueError:
+                            cv_auc_scores.append(float('nan'))
+                            print("  Warning: AUC calculation failed")
                 else:
                     cv_auc_scores.append(np.nan)
             else:
@@ -143,8 +158,23 @@ def evaluate_model_cv(clf, X_train_raw, y_train, X_test, y_test, cv_splitter, cl
                 if hasattr(fold_clf, 'predict_proba'):
                     test_proba = fold_clf.predict_proba(np.asarray(X_test_scaled))
                     if test_proba is not None and not np.isnan(test_proba).any():
-                        test_auc = roc_auc_score(y_test, test_proba[:, 1])
-                        test_auc_scores.append(test_auc)
+                        # Check AUC conditions
+                        n_unique_labels = len(np.unique(y_test))
+                        n_unique_preds = len(np.unique(test_pred))
+                        
+                        if n_unique_labels < 2:
+                            test_auc_scores.append(float('nan'))
+                            print("  Warning: Only one class in test labels - AUC undefined")
+                        elif n_unique_preds < 2:
+                            test_auc_scores.append(0.5)
+                            print("  Warning: Model predicting only ONE class - Using AUC = 0.5")
+                        else:
+                            try:
+                                test_auc = roc_auc_score(y_test, test_proba[:, 1])
+                                test_auc_scores.append(test_auc)
+                            except ValueError:
+                                test_auc_scores.append(float('nan'))
+                                print("  Warning: AUC calculation failed")
                     else:
                         test_auc_scores.append(np.nan)
                 else:
@@ -329,8 +359,23 @@ def save_all_models(classifiers, results_df, X_train_raw, y_train, X_test, y_tes
                 if hasattr(final_clf, 'predict_proba'):
                     test_proba = final_clf.predict_proba(np.asarray(X_test_scaled))
                     if test_proba is not None and not np.isnan(test_proba).any():
-                        test_auc = roc_auc_score(y_test, test_proba[:, 1])
-                        test_metrics['test_auc'] = float(test_auc)
+                        # Check AUC conditions
+                        n_unique_labels = len(np.unique(y_test))
+                        n_unique_preds = len(np.unique(test_pred))
+                        
+                        if n_unique_labels < 2:
+                            test_metrics['test_auc'] = float('nan')
+                            print("  Warning: Only one class in test labels - AUC undefined")
+                        elif n_unique_preds < 2:
+                            test_metrics['test_auc'] = 0.5
+                            print("  Warning: Model predicting only ONE class - Using AUC = 0.5")
+                        else:
+                            try:
+                                test_auc = roc_auc_score(y_test, test_proba[:, 1])
+                                test_metrics['test_auc'] = float(test_auc)
+                            except ValueError:
+                                test_metrics['test_auc'] = float('nan')
+                                print("  Warning: AUC calculation failed")
                 
                 print(f"      Test AUC: {test_metrics.get('test_auc', 'N/A'):.3f}" if 'test_auc' in test_metrics else "      Test AUC: N/A")
                 print(f"      Test Accuracy: {test_metrics['test_accuracy']:.3f}")
