@@ -56,6 +56,25 @@ python mri_extract_full.py <zip_file> <output_dir> --overwrite --workers 4
 - Scan filter: MPRAGE/MP-RAGE scans only
 - Max path length: 240 characters (Windows safe)
 
+## Utility Script: `calculate_summary_stats.py`
+
+**Purpose**: Reads the three MCI CSV splits (test/train/val), combines them, and prints dataset summary statistics:
+- Male vs Female counts
+- AD (label=1) vs CN (label=0) counts
+- Mean age and population standard deviation of age
+
+**Usage**:
+```bash
+python calculate_summary_stats.py
+```
+
+**Inputs** (CSV columns: `pat_id,label,Sex,Age`):
+- `/home/ssim0068/data/ADNI_v2/csvs/mci_test.csv`
+- `/home/ssim0068/data/ADNI_v2/csvs/mci_train.csv`
+- `/home/ssim0068/data/ADNI_v2/csvs/mci_val.csv`
+
+The script uses only Python's standard library and prints results to stdout.
+
 ## Analysis Notebook: `mri_extraction.ipynb`
 
 **Purpose**: Interactive Jupyter notebook for MRI data exploration, extraction, and subject sampling.
