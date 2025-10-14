@@ -1,0 +1,64 @@
+{
+  "neural_network": {
+    "hidden_sizes": [
+      [
+        128,
+        64
+      ],
+      [
+        256,
+        128,
+        64
+      ]
+    ],
+    "dropout": [
+      0.1,
+      0.3,
+      0.5
+    ],
+    "lr": [
+      0.001,
+      0.0005
+    ],
+    "epochs": [
+      200
+    ],
+    "batch_size": [
+      32
+    ],
+    "patience": [
+      20
+    ]
+  },
+  "protein_transformer": {
+    "d_model": [
+      32,
+      64
+    ],
+    "n_heads": [
+      2,
+      4
+    ],
+    "n_layers": [
+      1,
+      2
+    ],
+    "dropout": [
+      0.1,
+      0.3
+    ],
+    "lr": [
+      0.01,
+      0.005
+    ],
+    "epochs": [
+      80
+    ],
+    "batch_size": [
+      16
+    ],
+    "patience": [
+      15
+    ]
+  }
+}
