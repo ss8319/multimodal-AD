@@ -75,6 +75,30 @@ python calculate_summary_stats.py
 
 The script uses only Python's standard library and prints results to stdout.
 
+## Utility Script: `generate_image_baseline_dataset.py`
+
+**Purpose**: Combines the three MCI CSV splits and removes subjects that overlap with the proteomic dataset to create a clean MRI-only dataset.
+
+**Key Features**:
+- Combines mci_train.csv, mci_val.csv, and mci_test.csv
+- Matches pat_id with Subject from proteomic dataset
+- Removes overlapping subjects to avoid data leakage
+- Calculates demographic statistics for the filtered dataset
+
+**Inputs**:
+- `/home/ssim0068/data/ADNI_v2/csvs/mci_train.csv`
+- `/home/ssim0068/data/ADNI_v2/csvs/mci_val.csv` 
+- `/home/ssim0068/data/ADNI_v2/csvs/mci_test.csv`
+- `/home/ssim0068/multimodal-AD/src/data/protein/merged_proteomic_mri_mprage.csv`
+
+**Output**:
+- `/home/ssim0068/data/ADNI_v2/csvs/image_external_dataset.csv` - Filtered dataset without proteomic overlaps
+
+**Filtered Dataset Statistics** (636 subjects):
+- Male: 332 (52.2%), Female: 304 (47.8%)
+- AD: 274 (43.1%), CN: 362 (56.9%)
+- Age: 76.26 ± 6.92 years
+
 ## Analysis Notebook: `mri_extraction.ipynb`
 
 **Purpose**: Interactive Jupyter notebook for MRI data exploration, extraction, and subject sampling.
