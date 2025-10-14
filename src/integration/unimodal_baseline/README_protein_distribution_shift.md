@@ -18,3 +18,11 @@ Looking at the data, I see several large shifts:
 Mean differences (worst cases):
 APOE_CLAVYQAGAR: -1.08 (paired much lower)
 APOE_LGADMEDVR: -0.73 (paired much lower)
+
+
+
+uv run python src/integration/unimodal_baseline/mri_baseline.py 
+--data-csv data/multimodal-dataset/all.csv /
+--cv-splits-json multimodal-AD/runs/fusion_mlp_5fold_cv/cv_splits.json /
+--brainiac-ckpt multimodal-AD/src/mri/BrainIAC/src/checkpoints/BrainIAC.ckpt /
+--save-dir runs/baseline_mri_5fold_cv

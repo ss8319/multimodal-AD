@@ -24,6 +24,16 @@ uv run python src/integration/unimodal_baseline/protein_baseline.py \
   --save-dir runs/baseline_protein_mlp_5fold_cv
 ```
 
+```bash
+uv run python src/integration/unimodal_baseline/protein_baseline.py \
+  --model-type mlp \
+  --model-path src/protein/runs/run_20251009_113510/models/neural_network.pkl \
+  --scaler-path src/protein/runs/run_20251009_113510/scaler.pkl \
+  --data-csv /home/ssim0068/data/multimodal-dataset/all.csv \
+  --cv-splits-json runs/fusion_mlp_5fold_cv/cv_splits.json \
+  --save-dir runs/baseline_protein_mlp_5fold_cv_run_20251009_113510
+```
+
 ### Transformer Baseline
 
 ```bash
