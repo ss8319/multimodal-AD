@@ -377,15 +377,26 @@ def save_model(model, model_name, run_dir):
     if is_pytorch:
         # Save PyTorch model state dict
         model_path = model_dir / f"{model_name}.pth"
+        # Build a generic, model-agnostic config payload
+        generic_config = {}
+        for attr in [
+            'd_model', 'n_heads', 'n_layers', 'dropout', 'hidden_sizes',
+            'lr', 'epochs', 'batch_size', 'patience', 'random_state'
+        ]:
+            if hasattr(model, attr):
+                try:
+                    generic_config[attr] = getattr(model, attr)
+                except Exception:
+                    pass
+        # Try to record feature count if available
+        if hasattr(model.model, 'n_features'):
+            try:
+                generic_config['n_features'] = model.model.n_features
+            except Exception:
+                pass
         torch.save({
             'model_state_dict': model.model.state_dict(),
-            'model_config': {
-                'd_model': model.d_model,
-                'n_heads': model.n_heads,
-                'n_layers': model.n_layers,
-                'dropout': model.dropout,
-                'n_features': model.model.n_features
-            }
+            'model_config': generic_config
         }, model_path)
         print(f"   Saved PyTorch model: {model_path.name}")
     else:
