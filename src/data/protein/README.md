@@ -54,12 +54,17 @@ Reported stats for `proteomic_encoder_data.csv`:
 
 ## Train/test split for encoder
 
-Script: `generate_proteomic_encoder_train_test_split.py` (reads `proteomic_encoder_data.csv` and creates balanced splits)
+Script: `generate_proteomic_encoder_train_test_split.py` (reads `proteomic_with_demographics.csv` and creates balanced splits)
 
-Split sizes:
+**Key Features**:
+- Triple stratification by diagnosis, age (quantile-based), and sex
 
-- Train: 97 samples (84.3%) → `proteomic_encoder_train.csv`
-- Test:  18 samples (15.7%) → `proteomic_encoder_test.csv`
+- Comprehensive balance verification
+- Increased test size (20%) for better evaluation
+
+**Split sizes** (106 subjects):
+- Train: 84 samples (79.2%) → `proteomic_encoder_train.csv`
+- Test: 22 samples (20.8%) → `proteomic_encoder_test.csv`
 
 Train set (reported):
 

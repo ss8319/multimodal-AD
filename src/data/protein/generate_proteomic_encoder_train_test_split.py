@@ -9,7 +9,7 @@ from sklearn.model_selection import train_test_split
 
 def main():
     # Paths
-    input_path = Path("src/data/protein/proteomic_encoder_data.csv")
+    input_path = Path("src/data/protein/proteomic_with_demographics.csv")
     output_dir = input_path.parent
     train_path = output_dir / "proteomic_encoder_train.csv"
     test_path = output_dir / "proteomic_encoder_test.csv"
@@ -38,24 +38,60 @@ def main():
         pct = (count / len(df)) * 100
         print(f"  {group}: {count} ({pct:.1f}%)")
     
-    # 2. Stratified split by diagnosis, with age binning for balance
+    sex_counts = df['Sex'].value_counts()
+    print(f"\nSex Distribution:")
+    for sex, count in sex_counts.items():
+        pct = (count / len(df)) * 100
+        print(f"  {sex}: {count} ({pct:.1f}%)")
+    
+    # 2. Stratified split by diagnosis, age, and sex for balance
     print(f"\n{'=' * 70}")
     print("CREATING TRAIN/TEST SPLIT")
     print("=" * 70)
     
     # Create age bins for stratification (to balance age across splits)
-    df['age_bin'] = pd.cut(df['subject_age'], bins=5, labels=False)
+    # Use quantile-based bins for better age distribution
+    df['age_bin'] = pd.qcut(df['subject_age'], q=4, labels=False, duplicates='drop')
     
-    # Create combined stratification key (diagnosis + age_bin)
-    df['strat_key'] = df['research_group'].astype(str) + '_' + df['age_bin'].astype(str)
+    # Create combined stratification key (diagnosis + age_bin + sex)
+    df['strat_key'] = (df['research_group'].astype(str) + '_' + 
+                      df['age_bin'].astype(str) + '_' + 
+                      df['Sex'].astype(str))
     
-    # Split with stratification
-    train_df, test_df = train_test_split(
-        df,
-        test_size=0.15,
-        stratify=df['strat_key'],
-        random_state=42
-    )
+    # Check for single-sample groups and handle them
+    strat_counts = df['strat_key'].value_counts()
+    single_sample_groups = strat_counts[strat_counts == 1].index.tolist()
+    
+    if single_sample_groups:
+        print(f"Warning: Found {len(single_sample_groups)} single-sample groups: {single_sample_groups}")
+        print("These samples will be assigned to train set to enable splitting.")
+        
+        # Assign single-sample groups to train set
+        single_sample_mask = df['strat_key'].isin(single_sample_groups)
+        single_samples = df[single_sample_mask].copy()
+        remaining_df = df[~single_sample_mask].copy()
+        
+        # Split remaining data
+        if len(remaining_df) > 0:
+            train_df, test_df = train_test_split(
+                remaining_df,
+                test_size=0.20,  # Increased from 15% to 20% for better evaluation
+                stratify=remaining_df['strat_key'],
+                random_state=42
+            )
+            # Add single samples to train set
+            train_df = pd.concat([train_df, single_samples], ignore_index=True)
+        else:
+            # Fallback: random split if stratification fails
+            train_df, test_df = train_test_split(df, test_size=0.20, random_state=42)
+    else:
+        # Normal stratified split
+        train_df, test_df = train_test_split(
+            df,
+            test_size=0.20,  # Increased from 15% to 20% for better evaluation
+            stratify=df['strat_key'],
+            random_state=42
+        )
     
     # Remove temporary columns
     train_df = train_df.drop(columns=['age_bin', 'strat_key'])
@@ -70,6 +106,7 @@ def main():
     train_age_mean = train_df['subject_age'].mean()
     train_age_std = train_df['subject_age'].std()
     train_group_counts = train_df['research_group'].value_counts()
+    train_sex_counts = train_df['Sex'].value_counts()
     
     print(f"\nTrain Set:")
     print(f"  Age: {train_age_mean:.2f} ± {train_age_std:.2f} years")
@@ -77,11 +114,16 @@ def main():
     for group, count in train_group_counts.items():
         pct = (count / len(train_df)) * 100
         print(f"    {group}: {count} ({pct:.1f}%)")
+    print(f"  Sex:")
+    for sex, count in train_sex_counts.items():
+        pct = (count / len(train_df)) * 100
+        print(f"    {sex}: {count} ({pct:.1f}%)")
     
     # Test set statistics
     test_age_mean = test_df['subject_age'].mean()
     test_age_std = test_df['subject_age'].std()
     test_group_counts = test_df['research_group'].value_counts()
+    test_sex_counts = test_df['Sex'].value_counts()
     
     print(f"\nTest Set:")
     print(f"  Age: {test_age_mean:.2f} ± {test_age_std:.2f} years")
@@ -89,6 +131,10 @@ def main():
     for group, count in test_group_counts.items():
         pct = (count / len(test_df)) * 100
         print(f"    {group}: {count} ({pct:.1f}%)")
+    print(f"  Sex:")
+    for sex, count in test_sex_counts.items():
+        pct = (count / len(test_df)) * 100
+        print(f"    {sex}: {count} ({pct:.1f}%)")
     
     # 4. Save files
     print(f"\n{'=' * 70}")
@@ -116,6 +162,15 @@ def main():
         diff = abs(train_pct - test_pct)
         status = "OK" if diff < 2.0 else "WARNING"
         print(f"  {group}: Train={train_pct:.1f}%, Test={test_pct:.1f}%, Diff={diff:.1f}% [{status}]")
+    
+    # Check sex balance preservation
+    print(f"\nSex Balance (Train vs Test):")
+    for sex in sex_counts.index:
+        train_pct = (train_sex_counts.get(sex, 0) / len(train_df)) * 100
+        test_pct = (test_sex_counts.get(sex, 0) / len(test_df)) * 100
+        diff = abs(train_pct - test_pct)
+        status = "OK" if diff < 2.0 else "WARNING"
+        print(f"  {sex}: Train={train_pct:.1f}%, Test={test_pct:.1f}%, Diff={diff:.1f}% [{status}]")
     
     # Check age balance
     age_mean_diff = abs(train_age_mean - test_age_mean)
