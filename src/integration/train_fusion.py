@@ -22,7 +22,7 @@ from datetime import datetime
 sys.path.append(str(Path(__file__).parent.parent / "mri" / "BrainIAC" / "src"))
 
 from multimodal_dataset import MultimodalDataset
-from fusion_model import get_model
+from fusion_model import get_model, get_weighted_fusion_model
 from load_brainiac import load_brainiac
 
 
@@ -287,7 +287,9 @@ def main():
         # Model config
         'protein_model_type': 'mlp',  # 'mlp' or 'transformer'
         'protein_layer': 'hidden_layer_2',  # 'hidden_layer_2' for MLP, 'transformer_embeddings' for Transformer
+        'fusion_model_type': 'simple',  # 'simple' or 'weighted_attention'
         'hidden_dim': 128, #params for the fusion model
+        'fusion_dim': 128, #params for weighted fusion model (shared embedding dimension)
         'dropout': 0.3, #params for the fusion model
         
         # Cross-validation config
@@ -305,13 +307,14 @@ def main():
     }
     
     # Create meaningful save directory name with model info
-    config['save_dir'] = f'/home/ssim0068/multimodal-AD/runs/fusion_{config["protein_model_type"]}_{config["n_folds"]}fold_cv'
+    config['save_dir'] = f'/home/ssim0068/multimodal-AD/runs/fusion_{config["fusion_model_type"]}_{config["protein_model_type"]}_{config["n_folds"]}fold_cv'
     
     print("="*60)
     print("MULTIMODAL FUSION TRAINING - CROSS-VALIDATION")
     print("="*60)
     print(f"Model: Fusion (protein + MRI)")
     print(f"Protein model: {config['protein_model_type']} ({config['protein_layer']})")
+    print(f"Fusion model: {config['fusion_model_type']}")
     print(f"N-folds: {config['n_folds']}")
     print(f"Split ratio: {config['split_ratio']}")
     print(f"Batch size: {config['batch_size']}")
@@ -433,12 +436,25 @@ def main():
             torch.cuda.manual_seed(config['model_seed'])
         
         protein_dim = full_dataset.protein_dim
-        model = get_model(
-            protein_dim=protein_dim,
-            mri_dim=768,
-            hidden_dim=config['hidden_dim'],
-            dropout=config['dropout']
-        ).to(device)
+        
+        # Create fusion model based on type
+        if config['fusion_model_type'] == 'simple':
+            model = get_model(
+                protein_dim=protein_dim,
+                mri_dim=768,
+                hidden_dim=config['hidden_dim'],
+                dropout=config['dropout']
+            ).to(device)
+        elif config['fusion_model_type'] == 'weighted_attention':
+            model = get_weighted_fusion_model(
+                protein_dim=protein_dim,
+                mri_dim=768,
+                fusion_dim=config['fusion_dim'],
+                hidden_dim=config['hidden_dim'],
+                dropout=config['dropout']
+            ).to(device)
+        else:
+            raise ValueError(f"Unknown fusion_model_type: {config['fusion_model_type']}. Must be 'simple' or 'weighted_attention'")
         
         # Setup training with class weights to handle imbalance
         # Calculate class weights from training data
@@ -505,7 +521,7 @@ def main():
             if config['use_wandb']:
                 # Initialize wandb for this fold's training if not already initialized
                 if wandb.run is None:
-                    fold_run_name = f"fusion_{config['protein_model_type']}_fold{fold_idx}_training"
+                    fold_run_name = f"fusion_{config['fusion_model_type']}_{config['protein_model_type']}_fold{fold_idx}_training"
                     wandb.init(
                         project=config['wandb_project'],
                         entity=config['wandb_entity'],
@@ -650,7 +666,7 @@ def main():
             if wandb.run is not None:
                 wandb.finish()
             
-            fold_run_name = f"fusion_{config['protein_model_type']}_fold{fold_idx}"
+            fold_run_name = f"fusion_{config['fusion_model_type']}_{config['protein_model_type']}_fold{fold_idx}"
             wandb.init(
                 project=config['wandb_project'],
                 entity=config['wandb_entity'],
@@ -789,7 +805,7 @@ def main():
             project=config['wandb_project'],
             entity=config['wandb_entity'],
             group=config['wandb_group'],
-            name=f"fusion_{config['protein_model_type']}_{config['n_folds']}fold_cv_summary",
+            name=f"fusion_{config['fusion_model_type']}_{config['protein_model_type']}_{config['n_folds']}fold_cv_summary",
             config={k: v for k, v in config.items() if k != 'wandb_entity'},
             reinit=True
         )
@@ -858,7 +874,7 @@ def main():
                 'Recall': f"{fold['test_recall']:.4f}"
             })
         
-        wandb.log({"summary/fold_results": wandb.Table(data=fold_summary)})
+        wandb.log({"summary/fold_results": wandb.Table(dataframe=pd.DataFrame(fold_summary))})
         
         # Finish the run
         wandb.finish()
