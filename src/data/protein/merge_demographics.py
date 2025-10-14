@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """
 Merge Subject_Demographics.csv with proteomic_encoder_data.csv based on RID
-Add Sex column from PTGENDER (1=Male, 0=Female)
+Add Sex column from PTGENDER (1=Male, 2=Female)
 Calculate demographic statistics
+
+Usage:
+    python merge_demographics.py                    # Drop unknown sex rows (default)
+    python merge_demographics.py --keep-unknown-sex # Keep unknown sex rows
 """
 
 import csv
@@ -18,7 +22,7 @@ def read_csv_file(filepath):
             data.append(row)
     return data
 
-def merge_data(demographics, proteomic):
+def merge_data(demographics, proteomic, keep_unknown_sex=False):
     """Merge demographics and proteomic data based on RID"""
     # Create lookup dictionary for demographics by RID
     demo_lookup = {}
@@ -29,6 +33,8 @@ def merge_data(demographics, proteomic):
     
     # Merge proteomic data with demographics
     merged_data = []
+    unknown_sex_count = 0
+    
     for row in proteomic:
         rid = row.get('RID', '').strip()
         if rid in demo_lookup:
@@ -43,14 +49,20 @@ def merge_data(demographics, proteomic):
                 new_row['Sex'] = 'F'
             else:
                 new_row['Sex'] = 'Unknown'
+                unknown_sex_count += 1
             
             # Add other useful demographic info
             new_row['Age'] = demo_lookup[rid].get('PTDOBYY', '')
             new_row['Education'] = demo_lookup[rid].get('PTEDUCAT', '')
             
-            merged_data.append(new_row)
+            # Only add row if keeping unknown sex or if sex is known
+            if keep_unknown_sex or new_row['Sex'] != 'Unknown':
+                merged_data.append(new_row)
         else:
             print(f"Warning: RID {rid} not found in demographics data")
+    
+    if not keep_unknown_sex and unknown_sex_count > 0:
+        print(f"Dropped {unknown_sex_count} rows with Unknown Sex")
     
     return merged_data
 
@@ -99,7 +111,7 @@ def calculate_demographics(data):
         print("Age: No valid age data found")
 
 def save_merged_data(data, output_file):
-    """Save merged data to CSV"""
+    """Save merged data to CSV with organized column order"""
     if not data:
         print("No data to save")
         return
@@ -109,8 +121,27 @@ def save_merged_data(data, output_file):
     for row in data:
         all_columns.update(row.keys())
     
-    # Sort columns for consistent output
-    columns = sorted(list(all_columns))
+    # Define metadata columns (put these first)
+    metadata_columns = [
+        'RID', 'Subject', 'VISCODE', 'Visit', 'research_group', 'Group', 
+        'Sex', 'Age', 'subject_age', 'Education', 'PTGENDER', 'PTDOBYY', 'PTEDUCAT',
+        'Image Data ID', 'Description', 'Type', 'Modality', 'Format', 
+        'Acq Date', 'Downloaded', 'MRI_acquired'
+    ]
+    
+    # Get protein/peptide columns (everything else)
+    protein_columns = []
+    for col in sorted(all_columns):
+        if col not in metadata_columns:
+            protein_columns.append(col)
+    
+    # Combine: metadata first, then protein columns
+    columns = []
+    for col in metadata_columns:
+        if col in all_columns:
+            columns.append(col)
+    
+    columns.extend(protein_columns)
     
     with open(output_file, 'w', newline='') as file:
         writer = csv.DictWriter(file, fieldnames=columns)
@@ -118,8 +149,21 @@ def save_merged_data(data, output_file):
         writer.writerows(data)
     
     print(f"\nMerged data saved to: {output_file}")
+    print(f"Total columns: {len(columns)}")
+    print(f"Metadata columns: {len([c for c in columns if c in metadata_columns])}")
+    print(f"Protein/peptide columns: {len(protein_columns)}")
 
 def main():
+    import sys
+    
+    # Parse command line arguments
+    keep_unknown_sex = False
+    if len(sys.argv) > 1 and sys.argv[1] == '--keep-unknown-sex':
+        keep_unknown_sex = True
+        print("Flag: Keeping rows with Unknown Sex")
+    else:
+        print("Flag: Dropping rows with Unknown Sex (default)")
+    
     # File paths
     demographics_file = '/home/ssim0068/multimodal-AD/src/data/protein/Subject_Demographics.csv'
     proteomic_file = '/home/ssim0068/multimodal-AD/src/data/protein/proteomic_encoder_data.csv'
@@ -134,7 +178,7 @@ def main():
     print(f"Proteomic data: {len(proteomic)} rows")
     
     print("\nMerging data based on RID...")
-    merged_data = merge_data(demographics, proteomic)
+    merged_data = merge_data(demographics, proteomic, keep_unknown_sex)
     print(f"Merged data: {len(merged_data)} rows")
     
     print("\n" + "="*50)
