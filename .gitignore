@@ -21,6 +21,9 @@ research_pipeline/image_classification/logs
 !AD_CN/proteomics/Biomarkers Consortium Plasma Proteomics MRM/MRI/splits/*.csv
 !**/splits/*.csv
 
+# Ignore all CSV files in protein data directory
+src/data/protein/*.csv
+
 # Ignore large data folders
 AD_CN/proteomics/Biomarkers Consortium Plasma Proteomics MRM/MRI/MRI_AD_CN/
 AD_CN/proteomics/Biomarkers Consortium Plasma Proteomics MRM/MRI/Zip Files/
