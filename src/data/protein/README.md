@@ -15,6 +15,18 @@
   - 38 subjects
   - Used for fusion experiments (6:2:2 split)
   - Images in `github_repos\AD_CN_MRI_final`
+  
+  ```bash
+  Proteomic + MRI Cohort Summary
+  Total subjects: 38
+  AD: 15
+  CN: 23
+  Male: 13
+  Female: 25
+  Age mean: 74.32
+  Age std: 6.87
+  ```
+  - to generate statistic above run 'summarize_multimodal_cohort.py'
 
 - `proteomic_encoder_data.csv`
   - Data to train the protein encoder
