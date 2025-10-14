@@ -64,7 +64,7 @@ class ProteinDataLoader:
         """
         # 1. Identify feature columns (exclude metadata)
         if not self.feature_cols:
-            exclude_cols = [self.id_col, self.label_col, 'VISCODE', 'subject_age']
+            exclude_cols = [self.id_col, self.label_col, 'VISCODE', 'subject_age', 'Sex', 'Age', 'Education']
             self.feature_cols = [c for c in df.columns if c not in exclude_cols]
         
         # 2. Extract features and impute missing values
