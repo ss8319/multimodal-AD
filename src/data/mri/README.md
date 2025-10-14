@@ -84,15 +84,19 @@ The script uses only Python's standard library and prints results to stdout.
 - Matches pat_id with Subject from proteomic dataset
 - Removes overlapping subjects to avoid data leakage
 - Calculates demographic statistics for the filtered dataset
+- Then splits the into train/val/test with triple stratification based on Age, Sex, and Class
 
 **Inputs**:
-- `/home/ssim0068/data/ADNI_v2/csvs/mci_train.csv`
-- `/home/ssim0068/data/ADNI_v2/csvs/mci_val.csv` 
-- `/home/ssim0068/data/ADNI_v2/csvs/mci_test.csv`
+- `/home/ssim0068/data/ADNI_v2/deprecated_csvs/mci_train.csv`
+- `/home/ssim0068/data/ADNI_v2/deprecated_csvs/mci_val.csv` 
+- `/home/ssim0068/data/ADNI_v2/deprecated_csvs/mci_test.csv`
 - `/home/ssim0068/multimodal-AD/src/data/protein/merged_proteomic_mri_mprage.csv`
 
 **Output**:
 - `/home/ssim0068/data/ADNI_v2/csvs/image_external_dataset.csv` - Filtered dataset without proteomic overlaps
+- `/home/ssim0068/data/ADNI_v2/csvs/ad_train.csv` 
+- `/home/ssim0068/data/ADNI_v2/csvs/ad_val.csv` 
+- `/home/ssim0068/data/ADNI_v2/csvs/ad_test.csv` 
 
 **Filtered Dataset Statistics** (636 subjects):
 - Male: 332 (52.2%), Female: 304 (47.8%)
