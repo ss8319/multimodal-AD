@@ -19,6 +19,46 @@ except ImportError:
     from dataset import ProteinDataset
 
 
+class EarlyStopping:
+    """Lightweight early stopping utility."""
+
+    def __init__(self, patience=20, min_delta=0.0, mode="min", verbose=False):
+        self.patience = patience
+        self.min_delta = min_delta
+        self.mode = mode
+        self.verbose = verbose
+
+        if mode == "min":
+            self.best_score = np.inf
+            self.is_better = lambda current, best: current < best - self.min_delta
+        else:
+            self.best_score = -np.inf
+            self.is_better = lambda current, best: current > best + self.min_delta
+
+        self.counter = 0
+        self.best_state = None
+        self.best_epoch = None
+
+    def step(self, score, model=None, epoch=None):
+        if self.is_better(score, self.best_score):
+            self.best_score = score
+            self.counter = 0
+            self.best_epoch = epoch
+            if model is not None:
+                self.best_state = model.state_dict().copy()
+        else:
+            self.counter += 1
+            if self.counter >= self.patience:
+                if self.verbose:
+                    msg = f"Early stopping triggered (best epoch: {self.best_epoch}, score: {self.best_score:.4f})"
+                    print(msg)
+                return True
+        return False
+
+    def restore_best(self, model):
+        if self.best_state is not None and model is not None:
+            model.load_state_dict(self.best_state)
+
 class ProteinTransformer(nn.Module):
     """Simple Transformer for protein classification using self-attention"""
     def __init__(self, n_features, d_model=64, n_heads=4, n_layers=2, dropout=0.1):
@@ -136,12 +176,9 @@ class ProteinTransformerClassifier(BaseEstimator, ClassifierMixin):
         
         self.model.apply(init_weights)
         
-        # Training loop with early stopping
-        best_val_loss = float('inf')
-        patience_counter = 0
-        self.best_state = self.model.state_dict().copy()  # Initialize with current state
-        
-        for epoch in range(self.epochs):
+        early_stopper = EarlyStopping(patience=self.patience, min_delta=1e-3, mode="min", verbose=False)
+
+        for epoch in range(1, self.epochs + 1):
             # Training
             self.model.train()
             train_loss = 0
@@ -174,22 +211,10 @@ class ProteinTransformerClassifier(BaseEstimator, ClassifierMixin):
             
             val_loss /= len(val_loader) if len(val_loader) > 0 else 1
             
-            # Early stopping
-            if val_loss < best_val_loss:
-                best_val_loss = val_loss
-                patience_counter = 0
-                # Save best model state
-                self.best_state = self.model.state_dict().copy()
-            else:
-                patience_counter += 1
-                if patience_counter >= self.patience:
-                    break
-        
-        # Load best model
-        try:
-            self.model.load_state_dict(self.best_state)
-        except:
-            pass  # If loading fails, keep current state
+            if early_stopper.step(val_loss, model=self.model, epoch=epoch):
+                break
+
+        early_stopper.restore_best(self.model)
         return self
         
     def predict_proba(self, X):
@@ -255,12 +280,13 @@ class NeuralNetwork(nn.Module):
 class NeuralNetworkClassifier(BaseEstimator, ClassifierMixin):
     """Sklearn-compatible PyTorch neural network classifier."""
 
-    def __init__(self, hidden_sizes=(128, 64), dropout=0.2, lr=1e-3, epochs=200, batch_size=32, random_state=42):
+    def __init__(self, hidden_sizes=(128, 64), dropout=0.2, lr=1e-3, epochs=200, batch_size=32, patience=20, random_state=42):
         self.hidden_sizes = hidden_sizes
         self.dropout = dropout
         self.lr = lr
         self.epochs = epochs
         self.batch_size = batch_size
+        self.patience = patience
         self.random_state = random_state
 
     def fit(self, X, y):
@@ -301,8 +327,7 @@ class NeuralNetworkClassifier(BaseEstimator, ClassifierMixin):
 
         self.model.apply(init_weights)
 
-        best_state = self.model.state_dict().copy()
-        best_val_loss = float('inf')
+        early_stopper = EarlyStopping(patience=self.patience, min_delta=1e-3, mode="min", verbose=False)
 
         for epoch in range(1, self.epochs + 1):
             self.model.train()
@@ -326,12 +351,10 @@ class NeuralNetworkClassifier(BaseEstimator, ClassifierMixin):
                     val_loss += loss.item()
             val_loss /= max(1, len(val_loader))
 
-            if val_loss < best_val_loss:
-                best_val_loss = val_loss
-                best_state = self.model.state_dict().copy()
+            if early_stopper.step(val_loss, model=self.model, epoch=epoch):
+                break
 
-        # Restore best weights observed during training
-        self.model.load_state_dict(best_state)
+        early_stopper.restore_best(self.model)
         return self
 
     def predict_proba(self, X):
@@ -365,7 +388,7 @@ class NeuralNetworkClassifier(BaseEstimator, ClassifierMixin):
         except Exception:
             return np.random.randint(0, 2, len(X))
 
-def get_classifiers(random_state=42):
+def get_classifiers(random_state=42, nn_patience=20, transformer_patience=10):
     """
     Get dictionary of all classifiers for evaluation
     
@@ -377,13 +400,13 @@ def get_classifiers(random_state=42):
     """
     classifiers = {
         'Logistic Regression': LogisticRegression(random_state=random_state, max_iter=1000),
-        'Random Forest': RandomForestClassifier(n_estimators=100, random_state=random_state),
-        'SVM (RBF)': SVC(probability=True, random_state=random_state),
-        'Gradient Boosting': GradientBoostingClassifier(random_state=random_state),
-        'Neural Network': NeuralNetworkClassifier(hidden_sizes=(128, 64), dropout=0.2, lr=1e-3, epochs=200, batch_size=32, random_state=random_state),
+        # 'Random Forest': RandomForestClassifier(n_estimators=100, random_state=random_state),
+        # 'SVM (RBF)': SVC(probability=True, random_state=random_state),
+        # 'Gradient Boosting': GradientBoostingClassifier(random_state=random_state),
+        'Neural Network': NeuralNetworkClassifier(hidden_sizes=(128, 64), dropout=0.2, lr=1e-3, epochs=200, batch_size=32, patience=nn_patience, random_state=random_state),
         'Protein Transformer': ProteinTransformerClassifier(
             d_model=32, n_heads=2, n_layers=1, dropout=0.2,
-            lr=0.01, epochs=30, batch_size=16, patience=5, random_state=random_state
+            lr=0.01, epochs=80, batch_size=16, patience=transformer_patience, random_state=random_state
         )
     }
     return classifiers

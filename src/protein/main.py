@@ -63,7 +63,11 @@ def main(args):
     print(f"\nEVALUATING CLASSIFIERS")
     print("-" * 70)
     
-    classifiers = get_classifiers(random_state=args.random_state)
+    classifiers = get_classifiers(
+        random_state=args.random_state,
+        nn_patience=args.nn_patience,
+        transformer_patience=args.transformer_patience,
+    )
     results = []
     detailed_results = {}
     test_available = X_test is not None
@@ -151,6 +155,8 @@ if __name__ == "__main__":
     parser.add_argument("--n-folds", type=int, default=5, help="Number of cross-validation folds")
     parser.add_argument("--random-state", type=int, default=42, help="Random seed for reproducibility")
     parser.add_argument("--save-models", action="store_true", help="Train and save all models on full training set to timestamped run directory")
+    parser.add_argument("--nn-patience", type=int, default=20, help="Early stopping patience for neural network")
+    parser.add_argument("--transformer-patience", type=int, default=10, help="Early stopping patience for transformer")
     
     args = parser.parse_args()
     main(args)

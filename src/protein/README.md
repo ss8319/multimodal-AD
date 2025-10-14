@@ -26,7 +26,9 @@ uv run python src/protein/main.py
 uv run python src/protein/main.py \
   --train-data 'src/data/protein/proteomic_encoder_train.csv' \
   --test-data 'src/data/protein/proteomic_encoder_test.csv' \
-  --save-models
+  --save-models \
+  --nn-patience 20 \
+  --transformer-patience 20 
 
 # Change CV folds
 uv run python src/protein/main.py --n-folds 10
