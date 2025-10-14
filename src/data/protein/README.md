@@ -70,3 +70,36 @@ Test set (reported):
 
 - Age: 75.86 ± 6.96 years
 - Diagnosis: CN 10 (55.6%), AD 8 (44.4%)
+
+## Merge demographics with proteomic data
+
+Script: `merge_demographics.py`
+
+**Purpose**: Merges Subject_Demographics.csv with proteomic_encoder_data.csv based on RID to add demographic information (Sex, Age, Education) to the proteomic dataset.
+
+**Inputs**:
+- `Subject_Demographics.csv` - ADNI demographic data (6,212 rows)
+- `proteomic_encoder_data.csv` - Proteomic data for encoder training (115 rows)
+
+**Output**:
+- `proteomic_with_demographics.csv` - Merged dataset with demographic columns
+
+**Key Features**:
+- Merges on RID field
+- Adds Sex column from PTGENDER (1=Male, 2=Female)
+- Adds Age from subject_age column
+- Adds Education from PTEDUCAT
+- Calculates demographic statistics
+
+**Usage**:
+```bash
+python src/data/protein/merge_demographics.py
+```
+
+**Merged Dataset Statistics** (115 subjects):
+- Male: 66 (57.4%)
+- Female: 40 (34.8%)
+- Unknown Sex: 9 (7.8%)
+- AD: 52 (45.2%)
+- CN: 63 (54.8%)
+- Age: 75.96 ± 6.30 years (range: 58.5-89.64)
