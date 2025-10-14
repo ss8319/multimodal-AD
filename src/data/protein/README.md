@@ -89,17 +89,15 @@ Script: `merge_demographics.py`
 - Adds Sex column from PTGENDER (1=Male, 2=Female)
 - Adds Age from subject_age column
 - Adds Education from PTEDUCAT
+- Organized CSV output: metadata columns first, protein/peptide columns second
+- Optional flag to keep/drop rows with Unknown Sex
 - Calculates demographic statistics
 
 **Usage**:
 ```bash
+# Default: Drop unknown sex rows (106 subjects)
 python src/data/protein/merge_demographics.py
-```
 
-**Merged Dataset Statistics** (115 subjects):
-- Male: 66 (57.4%)
-- Female: 40 (34.8%)
-- Unknown Sex: 9 (7.8%)
-- AD: 52 (45.2%)
-- CN: 63 (54.8%)
-- Age: 75.96 ± 6.30 years (range: 58.5-89.64)
+# Keep all rows including unknown sex (115 subjects)
+python src/data/protein/merge_demographics.py --keep-unknown-sex
+```
