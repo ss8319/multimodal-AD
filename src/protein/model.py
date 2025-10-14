@@ -400,9 +400,9 @@ def get_classifiers(random_state=42, nn_patience=20, transformer_patience=10):
     """
     classifiers = {
         'Logistic Regression': LogisticRegression(random_state=random_state, max_iter=1000),
-        # 'Random Forest': RandomForestClassifier(n_estimators=100, random_state=random_state),
-        # 'SVM (RBF)': SVC(probability=True, random_state=random_state),
-        # 'Gradient Boosting': GradientBoostingClassifier(random_state=random_state),
+        'Random Forest': RandomForestClassifier(n_estimators=100, random_state=random_state),
+        'SVM (RBF)': SVC(probability=True, random_state=random_state),
+        'Gradient Boosting': GradientBoostingClassifier(random_state=random_state),
         'Neural Network': NeuralNetworkClassifier(hidden_sizes=(128, 64), dropout=0.2, lr=1e-3, epochs=200, batch_size=32, patience=nn_patience, random_state=random_state),
         'Protein Transformer': ProteinTransformerClassifier(
             d_model=32, n_heads=2, n_layers=1, dropout=0.2,
