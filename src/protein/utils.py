@@ -389,9 +389,18 @@ def save_model(model, model_name, run_dir):
                 except Exception:
                     pass
         # Try to record feature count if available
-        if hasattr(model.model, 'n_features'):
+        # Check classifier wrapper first (most reliable)
+        if hasattr(model, 'n_features'):
+            generic_config['n_features'] = model.n_features
+        # Fallback: check model directly
+        elif hasattr(model.model, 'n_features'):
+            generic_config['n_features'] = model.model.n_features
+        # Fallback: infer from NeuralNetwork first layer
+        elif hasattr(model.model, 'net') and len(model.model.net) > 0:
             try:
-                generic_config['n_features'] = model.model.n_features
+                first_layer = model.model.net[0]
+                if hasattr(first_layer, 'in_features'):
+                    generic_config['n_features'] = first_layer.in_features
             except Exception:
                 pass
         torch.save({

@@ -224,6 +224,7 @@ class ProteinTransformerClassifier(BaseEstimator, ClassifierMixin):
         # Store classes
         self.classes_ = np.unique(y)
         self.n_classes_ = len(self.classes_)
+        self.n_features = X.shape[1]  # Store for model saving
         
         # Create model
         self.model = ProteinTransformer(
@@ -365,6 +366,7 @@ class ProteinAttentionPoolingClassifier(BaseEstimator, ClassifierMixin):
         # Store classes
         self.classes_ = np.unique(y)
         self.n_classes_ = len(self.classes_)
+        self.n_features = X.shape[1]  # Store for model saving
         
         # Store feature names if available (for interpretation)
         if hasattr(X, 'columns'):
@@ -612,6 +614,7 @@ class NeuralNetworkClassifier(BaseEstimator, ClassifierMixin):
 
         self.classes_ = np.unique(y)
         self.n_classes_ = len(self.classes_)
+        self.n_features = X.shape[1]  # Store for model saving
 
         self.model = NeuralNetwork(
             n_features=X.shape[1],
