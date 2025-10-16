@@ -54,28 +54,35 @@ Reported stats for `proteomic_encoder_data.csv`:
 
 ## Train/test split for encoder
 
-Script: `generate_proteomic_encoder_train_test_split.py` (reads `proteomic_with_demographics.csv` and creates balanced splits)
+**Script**: `generate_proteomic_encoder_train_test_split.py`
+
+**Purpose**: Creates stratified train/test splits for proteomic encoder training with configurable demographic stratification
 
 **Key Features**:
-- Triple stratification by diagnosis, age (quantile-based), and sex
+- **Configurable stratification**: Choose any combination of diagnosis, age, and sex
+- **Flexible test size**: Adjustable test set proportion (default: 20%)
+- **Comprehensive balance verification**: Only checks stratified features
+- **Single-sample handling**: Automatically assigns single-sample groups to training set. But shouldn't happen 
+- **Reproducible**: Configurable random seed
 
-- Comprehensive balance verification
-- Increased test size (20%) for better evaluation
+**Usage Examples**:
 
-**Split sizes** (106 subjects):
-- Train: 84 samples (79.2%) → `proteomic_encoder_train.csv`
-- Test: 22 samples (20.8%) → `proteomic_encoder_test.csv`
+```bash
+# Default: stratify by all demographics (diagnosis, age, sex)
+uv run python generate_proteomic_encoder_train_test_split.py
 
-Train set (reported):
+# Stratify by diagnosis only
+uv run python generate_proteomic_encoder_train_test_split.py --stratify-by diagnosis
 
-- Age: 75.97 ± 6.24 years
-- Diagnosis: CN 53 (54.6%), AD 44 (45.4%)
+# Stratify by diagnosis and age only
+uv run python generate_proteomic_encoder_train_test_split.py --stratify-by diagnosis age
 
-Test set (reported):
+**Command-line Options**:
 
-- Age: 75.86 ± 6.96 years
-- Diagnosis: CN 10 (55.6%), AD 8 (44.4%)
-
+- `--stratify-by`: Demographic features to stratify by (`diagnosis`, `age`, `sex`)
+- `--test-size`: Proportion for test set (default: 0.20)
+- `--random-state`: Random seed (default: 42)
+- `--input-path`: Input CSV file path
 ## Merge demographics with proteomic data
 
 Script: `merge_demographics.py`
