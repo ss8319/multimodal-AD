@@ -60,19 +60,18 @@ class EarlyStopping:
             model.load_state_dict(self.best_state)
 
 class ProteinTransformer(nn.Module):
-    """Simple Transformer for protein classification using self-attention"""
+    """Improved Transformer for protein classification that treats each protein feature as a separate token"""
     def __init__(self, n_features, d_model=64, n_heads=4, n_layers=2, dropout=0.1):
         super().__init__()
         self.d_model = d_model # The dimensionality of the internal attention and hidden layers
         self.n_features = n_features # number of protein features in the input data
         
-        # Input projection
-        #A linear layer to map the raw input feature size (n_features) into the 
-        # required embedding dimension for the Transformer (d_model)
-        self.input_projection = nn.Linear(n_features, d_model)
+        # Feature embedding: projects each scalar protein value to d_model dimensions
+        self.feature_embedding = nn.Linear(1, d_model)
         
-        # Positional encoding for protein features
-        self.pos_encoding = nn.Parameter(torch.randn(1, 1, d_model) * 0.1)
+        # Positional encoding for protein features - one position per protein
+        # Shape: (1, n_features, d_model)
+        self.pos_encoding = nn.Parameter(torch.randn(1, n_features, d_model) * 0.1)
         
         # Transformer encoder layers
         encoder_layer = nn.TransformerEncoderLayer(
@@ -82,7 +81,7 @@ class ProteinTransformer(nn.Module):
             dropout=dropout,
             batch_first=True
         )
-        #Stacks the encoder layers on top of each other to form the encoder
+        # Stacks the encoder layers on top of each other to form the encoder
         self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=n_layers)
         
         # Classification head
@@ -99,21 +98,109 @@ class ProteinTransformer(nn.Module):
         # x shape: (batch_size, n_features)
         batch_size = x.size(0)
         
-        # Project to d_model and add batch dimension for sequence
-        x = self.input_projection(x)  # (batch_size, d_model)
-        x = x.unsqueeze(1)  # (batch_size, 1, d_model)
+        # Reshape to treat each protein as a separate token
+        x = x.unsqueeze(-1)  # (batch_size, n_features, 1)
+        
+        # Embed each protein feature into d_model dimensions
+        x = self.feature_embedding(x)  # (batch_size, n_features, d_model)
         
         # Add positional encoding
         x = x + self.pos_encoding
         
-        # Apply transformer
-        x = self.transformer(x)  # (batch_size, 1, d_model)
+        # Apply transformer - now processing a sequence of protein features
+        x = self.transformer(x)  # (batch_size, n_features, d_model)
         
-        # Global average pooling and classify
-        x = x.squeeze(1)  # (batch_size, d_model)
+        # Global average pooling over protein features
+        x = torch.mean(x, dim=1)  # (batch_size, d_model)
+        
+        # Classify
         logits = self.classifier(x)
         
         return logits
+
+
+class ProteinAttentionPooling(nn.Module):
+    """
+    Protein classification using learned protein embeddings + attention pooling.
+    
+    Each protein gets a learnable identity embedding that's combined with its measured value.
+    Attention pooling learns which proteins are most important for classification.
+    """
+    def __init__(self, n_features, d_model=64, dropout=0.2):
+        super().__init__()
+        self.n_features = n_features
+        self.d_model = d_model
+        
+        # Learnable embedding for each protein's identity
+        # Each protein gets its own learned representation
+        self.protein_embeddings = nn.Embedding(n_features, d_model)
+        
+        # Project protein concentration values to d_model space
+        self.value_projection = nn.Linear(1, d_model)
+        
+        # Attention mechanism: learns importance score for each protein
+        # Simplified to prevent collapse
+        self.attention_mlp = nn.Sequential(
+            nn.Linear(d_model, d_model),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(d_model, 1)
+        )
+        
+        # Classification head - deeper for better capacity
+        self.classifier = nn.Sequential(
+            nn.LayerNorm(d_model),
+            nn.Linear(d_model, d_model),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(d_model, d_model // 2),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(d_model // 2, 2)
+        )
+        
+        # Store attention weights for interpretation
+        self.last_attention_weights = None
+        
+    def forward(self, x, return_attention=False):
+        # x shape: (batch_size, n_features)
+        batch_size = x.size(0)
+        
+        # Get protein identity embeddings for all proteins
+        protein_indices = torch.arange(self.n_features, device=x.device)
+        identity_embeddings = self.protein_embeddings(protein_indices)  # (n_features, d_model)
+        identity_embeddings = identity_embeddings.unsqueeze(0).expand(batch_size, -1, -1)  # (batch_size, n_features, d_model)
+        
+        # Project concentration values
+        values = x.unsqueeze(-1)  # (batch_size, n_features, 1)
+        value_embeddings = self.value_projection(values)  # (batch_size, n_features, d_model)
+        
+        # Combine identity and value: additive (more stable than multiplicative)
+        # This prevents signal suppression
+        combined = identity_embeddings + value_embeddings  # (batch_size, n_features, d_model)
+        combined = F.relu(combined)  # Non-linearity
+        
+        # Compute attention scores for each protein
+        attention_logits = self.attention_mlp(combined).squeeze(-1)  # (batch_size, n_features)
+        attention_weights = F.softmax(attention_logits, dim=1)  # (batch_size, n_features)
+        
+        # Store attention weights for interpretation
+        self.last_attention_weights = attention_weights.detach()
+        
+        # Weighted sum of protein representations
+        attended = torch.bmm(attention_weights.unsqueeze(1), combined).squeeze(1)  # (batch_size, d_model)
+        
+        # Classify
+        logits = self.classifier(attended)
+        
+        if return_attention:
+            return logits, attention_weights
+        return logits
+    
+    def get_attention_weights(self):
+        """Return the last computed attention weights for interpretation"""
+        return self.last_attention_weights
+
 
 class ProteinTransformerClassifier(BaseEstimator, ClassifierMixin):
     """Sklearn-compatible wrapper for ProteinTransformer"""
@@ -177,7 +264,7 @@ class ProteinTransformerClassifier(BaseEstimator, ClassifierMixin):
         self.model.apply(init_weights)
         
         early_stopper = EarlyStopping(patience=self.patience, min_delta=1e-3, mode="min", verbose=False)
-
+        
         for epoch in range(1, self.epochs + 1):
             # Training
             self.model.train()
@@ -212,8 +299,8 @@ class ProteinTransformerClassifier(BaseEstimator, ClassifierMixin):
             val_loss /= len(val_loader) if len(val_loader) > 0 else 1
             
             if early_stopper.step(val_loss, model=self.model, epoch=epoch):
-                break
-
+                    break
+        
         early_stopper.restore_best(self.model)
         return self
         
@@ -256,6 +343,236 @@ class ProteinTransformerClassifier(BaseEstimator, ClassifierMixin):
         except Exception as e:
             # Fallback: return random predictions
             return np.random.randint(0, 2, len(X))
+
+
+class ProteinAttentionPoolingClassifier(BaseEstimator, ClassifierMixin):
+    """Sklearn-compatible wrapper for ProteinAttentionPooling with interpretability features"""
+    
+    def __init__(self, d_model=64, dropout=0.2, lr=0.001, epochs=100, batch_size=32, patience=10, random_state=42):
+        self.d_model = d_model
+        self.dropout = dropout
+        self.lr = lr
+        self.epochs = epochs
+        self.batch_size = batch_size
+        self.patience = patience
+        self.random_state = random_state
+        
+    def fit(self, X, y):
+        # Set random seeds
+        torch.manual_seed(self.random_state)
+        np.random.seed(self.random_state)
+        
+        # Store classes
+        self.classes_ = np.unique(y)
+        self.n_classes_ = len(self.classes_)
+        
+        # Store feature names if available (for interpretation)
+        if hasattr(X, 'columns'):
+            self.feature_names_ = X.columns.tolist()
+        else:
+            self.feature_names_ = [f"protein_{i}" for i in range(X.shape[1])]
+        
+        # Convert to numpy if needed
+        if hasattr(X, 'values'):
+            X = X.values
+        
+        # Create model
+        self.model = ProteinAttentionPooling(
+            n_features=X.shape[1],
+            d_model=self.d_model,
+            dropout=self.dropout
+        )
+        
+        # Only split for validation if we have enough samples
+        if len(X) > 10:
+            X_tr, X_val, y_tr, y_val = train_test_split(
+                X, y, test_size=0.2, random_state=self.random_state, stratify=y
+            )
+        else:
+            X_tr, X_val, y_tr, y_val = X, X, y, y
+        
+        # Create datasets and loaders
+        train_dataset = ProteinDataset(X_tr, y_tr)
+        val_dataset = ProteinDataset(X_val, y_val)
+        
+        train_loader = DataLoader(train_dataset, batch_size=self.batch_size, shuffle=True)
+        val_loader = DataLoader(val_dataset, batch_size=self.batch_size, shuffle=False)
+        
+        # Compute class weights for balanced training
+        unique_labels, counts = np.unique(y, return_counts=True)
+        class_weights = torch.FloatTensor([counts.sum() / (len(unique_labels) * c) for c in counts])
+        
+        # Optimizer and loss with class weights
+        optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr, weight_decay=1e-4)
+        criterion = nn.CrossEntropyLoss(weight=class_weights, label_smoothing=0.05)
+        
+        # Initialize weights with better scaling
+        def init_weights(m):
+            if isinstance(m, nn.Linear):
+                torch.nn.init.xavier_uniform_(m.weight, gain=1.0)
+                if m.bias is not None:
+                    m.bias.data.zero_()
+            elif isinstance(m, nn.Embedding):
+                # Smaller initialization for embeddings to prevent dominance
+                torch.nn.init.normal_(m.weight, mean=0, std=0.02)
+        
+        self.model.apply(init_weights)
+        
+        # Initialize final layer bias to reflect class distribution
+        # This helps the model start with balanced predictions
+        if hasattr(self.model.classifier[-1], 'bias') and self.model.classifier[-1].bias is not None:
+            class_priors = counts / counts.sum()
+            self.model.classifier[-1].bias.data = torch.log(torch.FloatTensor(class_priors))
+        
+        early_stopper = EarlyStopping(patience=self.patience, min_delta=1e-3, mode="min", verbose=False)
+        
+        for epoch in range(1, self.epochs + 1):
+            # Training
+            self.model.train()
+            train_loss = 0
+            for batch_X, batch_y in train_loader:
+                optimizer.zero_grad()
+                logits = self.model(batch_X)
+                loss = criterion(logits, batch_y)
+                
+                if torch.isnan(loss):
+                    print("Warning: NaN loss detected, skipping batch")
+                    continue
+                
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+                optimizer.step()
+                train_loss += loss.item()
+            
+            # Validation
+            self.model.eval()
+            val_loss = 0
+            with torch.no_grad():
+                for batch_X, batch_y in val_loader:
+                    logits = self.model(batch_X)
+                    loss = criterion(logits, batch_y)
+                    val_loss += loss.item()
+            
+            val_loss /= len(val_loader) if len(val_loader) > 0 else 1
+            
+            if early_stopper.step(val_loss, model=self.model, epoch=epoch):
+                break
+        
+        early_stopper.restore_best(self.model)
+        return self
+    
+    def predict_proba(self, X):
+        try:
+            # Convert to numpy if needed
+            if hasattr(X, 'values'):
+                X = X.values
+                
+            self.model.eval()
+            with torch.no_grad():
+                X_tensor = torch.FloatTensor(X)
+                logits = self.model(X_tensor)
+                probas = F.softmax(logits, dim=1)
+                probas_np = probas.numpy()
+                
+                if np.isnan(probas_np).any() or np.isinf(probas_np).any():
+                    print(f"Warning: Invalid probabilities detected, using fallback")
+                    n_samples = len(X)
+                    probas_np = np.column_stack([
+                        np.random.uniform(0.3, 0.7, n_samples),
+                        np.random.uniform(0.3, 0.7, n_samples)
+                    ])
+                    probas_np = probas_np / probas_np.sum(axis=1, keepdims=True)
+                
+                return probas_np
+        except Exception as e:
+            print(f"Error in predict_proba: {e}")
+            n_samples = len(X)
+            probas = np.column_stack([
+                np.random.uniform(0.3, 0.7, n_samples),
+                np.random.uniform(0.3, 0.7, n_samples)
+            ])
+            return probas / probas.sum(axis=1, keepdims=True)
+    
+    def predict(self, X):
+        try:
+            probas = self.predict_proba(X)
+            return np.argmax(probas, axis=1)
+        except Exception:
+            return np.random.randint(0, 2, len(X))
+    
+    def get_attention_weights(self, X):
+        """
+        Get attention weights for each protein for the given samples.
+        
+        Returns:
+            np.ndarray: Attention weights of shape (n_samples, n_proteins)
+        """
+        try:
+            # Convert to numpy if needed
+            if hasattr(X, 'values'):
+                X = X.values
+                
+            self.model.eval()
+            with torch.no_grad():
+                X_tensor = torch.FloatTensor(X)
+                _, attention_weights = self.model(X_tensor, return_attention=True)
+                return attention_weights.numpy()
+        except Exception as e:
+            print(f"Error getting attention weights: {e}")
+            return None
+    
+    def get_top_proteins(self, X, top_k=10):
+        """
+        Get the top-k most attended proteins for each sample.
+        
+        Args:
+            X: Input samples
+            top_k: Number of top proteins to return
+            
+        Returns:
+            list: List of tuples (sample_idx, [(protein_name, attention_weight), ...])
+        """
+        attention_weights = self.get_attention_weights(X)
+        if attention_weights is None:
+            return None
+        
+        results = []
+        for sample_idx, weights in enumerate(attention_weights):
+            # Get top-k indices
+            top_indices = np.argsort(weights)[-top_k:][::-1]
+            top_proteins = [
+                (self.feature_names_[idx], float(weights[idx]))
+                for idx in top_indices
+            ]
+            results.append((sample_idx, top_proteins))
+        
+        return results
+    
+    def get_mean_attention_by_class(self, X, y):
+        """
+        Get mean attention weights for each class.
+        
+        Returns:
+            dict: {class_label: {protein_name: mean_attention}}
+        """
+        attention_weights = self.get_attention_weights(X)
+        if attention_weights is None:
+            return None
+        
+        # Convert to numpy if needed
+        if hasattr(y, 'values'):
+            y = y.values
+        
+        results = {}
+        for class_label in np.unique(y):
+            class_mask = y == class_label
+            class_attention = attention_weights[class_mask].mean(axis=0)
+            results[class_label] = {
+                self.feature_names_[i]: float(class_attention[i])
+                for i in range(len(self.feature_names_))
+            }
+        
+        return results
 
 
 class NeuralNetwork(nn.Module):
@@ -387,7 +704,7 @@ class NeuralNetworkClassifier(BaseEstimator, ClassifierMixin):
             return np.argmax(probas, axis=1)
         except Exception:
             return np.random.randint(0, 2, len(X))
-
+from xgboost import XGBClassifier
 def get_classifiers(random_state=42, nn_patience=20, transformer_patience=10):
     """
     Get dictionary of all classifiers for evaluation
@@ -403,10 +720,23 @@ def get_classifiers(random_state=42, nn_patience=20, transformer_patience=10):
         'Random Forest': RandomForestClassifier(n_estimators=100, random_state=random_state),
         'SVM (RBF)': SVC(probability=True, random_state=random_state),
         'Gradient Boosting': GradientBoostingClassifier(random_state=random_state),
+        'XGBoost': XGBClassifier(
+            random_state=random_state,
+            eval_metric='logloss',  # For binary classification
+            n_estimators=100,
+            max_depth=6,
+            learning_rate=0.1,
+            subsample=0.8,
+            colsample_bytree=0.9
+        ),
         'Neural Network': NeuralNetworkClassifier(hidden_sizes=(128, 64), dropout=0.2, lr=1e-3, epochs=200, batch_size=32, patience=nn_patience, random_state=random_state),
-        'Protein Transformer': ProteinTransformerClassifier(
-            d_model=32, n_heads=2, n_layers=1, dropout=0.2,
-            lr=0.01, epochs=80, batch_size=16, patience=transformer_patience, random_state=random_state
-        )
+    #     'Protein Transformer': ProteinTransformerClassifier(
+    #         d_model=32, n_heads=4, n_layers=2, dropout=0.3,
+    #         lr=0.001, epochs=100, batch_size=16, patience=transformer_patience, random_state=random_state
+    #     ),
+    #     'Protein Attention Pooling': ProteinAttentionPoolingClassifier(
+    #         d_model=32, dropout=0.2,
+    #         lr=0.001, epochs=200, batch_size=8, patience=20, random_state=random_state
+    #     )
     }
     return classifiers
