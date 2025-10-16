@@ -8,6 +8,339 @@ from pathlib import Path
 from sklearn.model_selection import train_test_split
 
 
+def create_age_bins(df, n_bins=4):
+    """Create age bins with better distribution"""
+    try:
+        # Try quantile-based binning first
+        df['age_bin'] = pd.qcut(df['subject_age'], q=n_bins, labels=False, duplicates='drop')
+        return df
+    except ValueError:
+        # Fallback to equal-width binning if quantiles fail
+        df['age_bin'] = pd.cut(df['subject_age'], bins=n_bins, labels=False, include_lowest=True)
+        return df
+
+
+def apply_stratification_strategy(df, stratify_by, strategy, test_size, random_state, age_bins, min_samples_per_group):
+    """Apply different stratification strategies"""
+    
+    if strategy == 'strict':
+        return strict_stratification(df, stratify_by, test_size, random_state, age_bins, min_samples_per_group)
+    elif strategy == 'relaxed':
+        return relaxed_stratification(df, stratify_by, test_size, random_state, age_bins, min_samples_per_group)
+    elif strategy == 'hierarchical':
+        return hierarchical_stratification(df, stratify_by, test_size, random_state, age_bins, min_samples_per_group)
+    elif strategy == 'balanced':
+        return balanced_stratification(df, stratify_by, test_size, random_state, age_bins, min_samples_per_group)
+    else:
+        raise ValueError(f"Unknown strategy: {strategy}")
+
+
+def strict_stratification(df, stratify_by, test_size, random_state, age_bins, min_samples_per_group):
+    """Strict stratification - fail if impossible"""
+    df = df.copy()
+    
+    # Create stratification key
+    strat_components = []
+    
+    if 'diagnosis' in stratify_by:
+        strat_components.append(df['research_group'].astype(str))
+    
+    if 'age' in stratify_by:
+        df = create_age_bins(df, age_bins)
+        strat_components.append(df['age_bin'].astype(str))
+    
+    if 'sex' in stratify_by:
+        strat_components.append(df['Sex'].astype(str))
+    
+    # Create combined stratification key
+    if len(strat_components) == 1:
+        df['strat_key'] = strat_components[0]
+    else:
+        df['strat_key'] = strat_components[0]
+        for component in strat_components[1:]:
+            df['strat_key'] = df['strat_key'] + '_' + component
+    
+    # Check for groups with insufficient samples
+    strat_counts = df['strat_key'].value_counts()
+    insufficient_groups = strat_counts[strat_counts < min_samples_per_group].index.tolist()
+    
+    if insufficient_groups:
+        raise ValueError(f"Strict stratification failed: {len(insufficient_groups)} groups have < {min_samples_per_group} samples: {insufficient_groups}")
+    
+    # Perform stratified split
+    train_df, test_df = train_test_split(
+        df, test_size=test_size, stratify=df['strat_key'], random_state=random_state
+    )
+    
+    return train_df, test_df
+
+
+def relaxed_stratification(df, stratify_by, test_size, random_state, age_bins, min_samples_per_group):
+    """Relaxed stratification - fallback to fewer factors if needed"""
+    df = df.copy()
+    
+    # Try with all factors first, then progressively remove factors
+    for num_factors in range(len(stratify_by), 0, -1):
+        try:
+            current_factors = stratify_by[:num_factors]
+            print(f"  Trying stratification with {num_factors} factors: {current_factors}")
+            
+            strat_components = []
+            
+            if 'diagnosis' in current_factors:
+                strat_components.append(df['research_group'].astype(str))
+            
+            if 'age' in current_factors:
+                df = create_age_bins(df, age_bins)
+                strat_components.append(df['age_bin'].astype(str))
+            
+            if 'sex' in current_factors:
+                strat_components.append(df['Sex'].astype(str))
+            
+            # Create stratification key
+            if len(strat_components) == 1:
+                df['strat_key'] = strat_components[0]
+            else:
+                df['strat_key'] = strat_components[0]
+                for component in strat_components[1:]:
+                    df['strat_key'] = df['strat_key'] + '_' + component
+            
+            # Check if stratification is possible
+            strat_counts = df['strat_key'].value_counts()
+            insufficient_groups = strat_counts[strat_counts < min_samples_per_group]
+            
+            if len(insufficient_groups) == 0:
+                print(f"  ✓ Success with {num_factors} factors")
+                break
+            else:
+                print(f"  ✗ Failed with {num_factors} factors: {len(insufficient_groups)} insufficient groups")
+                continue
+                
+        except Exception as e:
+            print(f"  ✗ Failed with {num_factors} factors: {e}")
+            continue
+    
+    # Handle insufficient groups by assigning them to training
+    strat_counts = df['strat_key'].value_counts()
+    insufficient_groups = strat_counts[strat_counts < min_samples_per_group].index.tolist()
+    
+    if insufficient_groups:
+        print(f"  Assigning {len(insufficient_groups)} insufficient groups to training set")
+        insufficient_mask = df['strat_key'].isin(insufficient_groups)
+        insufficient_samples = df[insufficient_mask].copy()
+        remaining_df = df[~insufficient_mask].copy()
+        
+        if len(remaining_df) > 0:
+            train_df, test_df = train_test_split(
+                remaining_df, test_size=test_size, stratify=remaining_df['strat_key'], random_state=random_state
+            )
+            train_df = pd.concat([train_df, insufficient_samples], ignore_index=True)
+        else:
+            train_df, test_df = train_test_split(df, test_size=test_size, random_state=random_state)
+    else:
+        train_df, test_df = train_test_split(
+            df, test_size=test_size, stratify=df['strat_key'], random_state=random_state
+        )
+    
+    return train_df, test_df
+
+
+def hierarchical_stratification(df, stratify_by, test_size, random_state, age_bins, min_samples_per_group):
+    """Hierarchical stratification - prioritize most important factors"""
+    df = df.copy()
+    
+    # Priority order: diagnosis > age > sex
+    priority_order = ['diagnosis', 'age', 'sex']
+    available_factors = [f for f in priority_order if f in stratify_by]
+    
+    print(f"  Hierarchical order: {available_factors}")
+    
+    # Start with highest priority factor
+    current_factors = [available_factors[0]]
+    
+    for i in range(1, len(available_factors) + 1):
+        try:
+            current_factors = available_factors[:i]
+            print(f"  Trying with factors: {current_factors}")
+            
+            strat_components = []
+            
+            if 'diagnosis' in current_factors:
+                strat_components.append(df['research_group'].astype(str))
+            
+            if 'age' in current_factors:
+                df = create_age_bins(df, age_bins)
+                strat_components.append(df['age_bin'].astype(str))
+            
+            if 'sex' in current_factors:
+                strat_components.append(df['Sex'].astype(str))
+            
+            # Create stratification key
+            if len(strat_components) == 1:
+                df['strat_key'] = strat_components[0]
+            else:
+                df['strat_key'] = strat_components[0]
+                for component in strat_components[1:]:
+                    df['strat_key'] = df['strat_key'] + '_' + component
+            
+            # Check if this level works
+            strat_counts = df['strat_key'].value_counts()
+            insufficient_groups = strat_counts[strat_counts < min_samples_per_group]
+            
+            if len(insufficient_groups) == 0:
+                print(f"  ✓ Success with {len(current_factors)} factors")
+                break
+            else:
+                print(f"  ✗ {len(insufficient_groups)} insufficient groups, trying fewer factors")
+                
+        except Exception as e:
+            print(f"  ✗ Error: {e}")
+            break
+    
+    # Use the best stratification we found
+    strat_counts = df['strat_key'].value_counts()
+    insufficient_groups = strat_counts[strat_counts < min_samples_per_group].index.tolist()
+    
+    if insufficient_groups:
+        print(f"  Assigning {len(insufficient_groups)} insufficient groups to training set")
+        insufficient_mask = df['strat_key'].isin(insufficient_groups)
+        insufficient_samples = df[insufficient_mask].copy()
+        remaining_df = df[~insufficient_mask].copy()
+        
+        if len(remaining_df) > 0:
+            train_df, test_df = train_test_split(
+                remaining_df, test_size=test_size, stratify=remaining_df['strat_key'], random_state=random_state
+            )
+            train_df = pd.concat([train_df, insufficient_samples], ignore_index=True)
+        else:
+            train_df, test_df = train_test_split(df, test_size=test_size, random_state=random_state)
+    else:
+        train_df, test_df = train_test_split(
+            df, test_size=test_size, stratify=df['strat_key'], random_state=random_state
+        )
+    
+    return train_df, test_df
+
+
+def balanced_stratification(df, stratify_by, test_size, random_state, age_bins, min_samples_per_group):
+    """Balanced stratification - optimize for best balance across all factors"""
+    df = df.copy()
+    
+    # For age + diagnosis, use adaptive age binning
+    if 'age' in stratify_by and 'diagnosis' in stratify_by:
+        return age_diagnosis_balanced_stratification(df, test_size, random_state, age_bins, min_samples_per_group)
+    
+    # Fallback to hierarchical for other combinations
+    return hierarchical_stratification(df, stratify_by, test_size, random_state, age_bins, min_samples_per_group)
+
+
+def age_diagnosis_balanced_stratification(df, test_size, random_state, age_bins, min_samples_per_group):
+    """Specialized stratification for age + diagnosis combination"""
+    df = df.copy()
+    
+    # Try different age binning strategies
+    best_split = None
+    best_score = float('inf')
+    
+    for bin_strategy in ['quantile', 'equal_width', 'adaptive']:
+        try:
+            print(f"  Trying {bin_strategy} age binning...")
+            
+            if bin_strategy == 'quantile':
+                df['age_bin'] = pd.qcut(df['subject_age'], q=age_bins, labels=False, duplicates='drop')
+            elif bin_strategy == 'equal_width':
+                df['age_bin'] = pd.cut(df['subject_age'], bins=age_bins, labels=False, include_lowest=True)
+            elif bin_strategy == 'adaptive':
+                # Adaptive binning: ensure each diagnosis has samples in each age bin
+                df['age_bin'] = adaptive_age_binning(df, age_bins)
+            
+            # Create stratification key
+            df['strat_key'] = df['research_group'].astype(str) + '_' + df['age_bin'].astype(str)
+            
+            # Check group sizes
+            strat_counts = df['strat_key'].value_counts()
+            insufficient_groups = strat_counts[strat_counts < min_samples_per_group]
+            
+            if len(insufficient_groups) == 0:
+                # Perfect stratification possible
+                train_df, test_df = train_test_split(
+                    df, test_size=test_size, stratify=df['strat_key'], random_state=random_state
+                )
+                
+                # Calculate balance score (lower is better)
+                score = calculate_balance_score(train_df, test_df)
+                print(f"    ✓ Perfect stratification, balance score: {score:.3f}")
+                
+                if score < best_score:
+                    best_score = score
+                    best_split = (train_df.copy(), test_df.copy())
+            else:
+                print(f"    ✗ {len(insufficient_groups)} insufficient groups")
+                
+        except Exception as e:
+            print(f"    ✗ Error: {e}")
+            continue
+    
+    if best_split is not None:
+        return best_split
+    else:
+        # Fallback: use relaxed stratification
+        print("  Falling back to relaxed stratification...")
+        return relaxed_stratification(df, ['diagnosis', 'age'], test_size, random_state, age_bins, min_samples_per_group)
+
+
+def adaptive_age_binning(df, n_bins):
+    """Create age bins that ensure each diagnosis has samples in each bin"""
+    # Start with quantile-based binning
+    try:
+        age_bins = pd.qcut(df['subject_age'], q=n_bins, labels=False, duplicates='drop')
+    except ValueError:
+        age_bins = pd.cut(df['subject_age'], bins=n_bins, labels=False, include_lowest=True)
+    
+    # Check if each diagnosis has samples in each age bin
+    diagnosis_counts = df.groupby(['research_group', age_bins]).size().unstack(fill_value=0)
+    
+    # If any diagnosis-age combination is empty, adjust bins
+    if diagnosis_counts.min().min() == 0:
+        # Use fewer bins
+        for bins in range(n_bins-1, 1, -1):
+            try:
+                age_bins = pd.qcut(df['subject_age'], q=bins, labels=False, duplicates='drop')
+                diagnosis_counts = df.groupby(['research_group', age_bins]).size().unstack(fill_value=0)
+                if diagnosis_counts.min().min() > 0:
+                    break
+            except ValueError:
+                continue
+    
+    return age_bins
+
+
+def calculate_balance_score(train_df, test_df):
+    """Calculate balance score (lower is better)"""
+    score = 0
+    
+    # Age balance
+    age_diff = abs(train_df['subject_age'].mean() - test_df['subject_age'].mean())
+    score += age_diff
+    
+    # Diagnosis balance
+    train_diag = train_df['research_group'].value_counts(normalize=True)
+    test_diag = test_df['research_group'].value_counts(normalize=True)
+    for diag in train_diag.index:
+        if diag in test_diag.index:
+            score += abs(train_diag[diag] - test_diag[diag])
+    
+    # Sex balance (if present)
+    if 'Sex' in train_df.columns:
+        train_sex = train_df['Sex'].value_counts(normalize=True)
+        test_sex = test_df['Sex'].value_counts(normalize=True)
+        for sex in train_sex.index:
+            if sex in test_sex.index:
+                score += abs(train_sex[sex] - test_sex[sex])
+    
+    return score
+
+
 def main():
     # Parse command line arguments
     parser = argparse.ArgumentParser(
@@ -45,9 +378,30 @@ Examples:
     )
     
     parser.add_argument(
+        '--stratification-strategy',
+        choices=['strict', 'relaxed', 'hierarchical', 'balanced'],
+        default='balanced',
+        help='Stratification strategy: strict (fail if impossible), relaxed (fallback to fewer factors), hierarchical (prioritize factors), balanced (optimize balance)'
+    )
+    
+    parser.add_argument(
+        '--age-bins',
+        type=int,
+        default=4,
+        help='Number of age bins for stratification (default: 4)'
+    )
+    
+    parser.add_argument(
+        '--min-samples-per-group',
+        type=int,
+        default=2,
+        help='Minimum samples required per stratification group (default: 2)'
+    )
+    
+    parser.add_argument(
         '--input-path',
         type=str,
-        default='multimodal-AD/src/data/protein/proteomic_with_demographics.csv',
+        default='src/data/protein/proteomic_with_demographics.csv',
         help='Path to input CSV file (default: src/data/protein/proteomic_with_demographics.csv)'
     )
     
@@ -96,68 +450,18 @@ Examples:
         pct = (count / len(df)) * 100
         print(f"  {sex}: {count} ({pct:.1f}%)")
     
-    # 2. Stratified split by selected demographic features
+    # 2. Improved stratified split with multiple strategies
     print(f"\n{'=' * 70}")
     print("CREATING TRAIN/TEST SPLIT")
     print("=" * 70)
+    print(f"Strategy: {args.stratification_strategy}")
+    print(f"Min samples per group: {args.min_samples_per_group}")
     
-    # Build stratification key based on selected features
-    strat_components = []
-    
-    if 'diagnosis' in args.stratify_by:
-        strat_components.append(df['research_group'].astype(str))
-    
-    if 'age' in args.stratify_by:
-        # Create age bins for stratification (to balance age across splits)
-        # Use quantile-based bins for better age distribution
-        df['age_bin'] = pd.qcut(df['subject_age'], q=4, labels=False, duplicates='drop')
-        strat_components.append(df['age_bin'].astype(str))
-    
-    if 'sex' in args.stratify_by:
-        strat_components.append(df['Sex'].astype(str))
-    
-    # Create combined stratification key
-    if len(strat_components) == 1:
-        df['strat_key'] = strat_components[0]
-    else:
-        df['strat_key'] = strat_components[0]
-        for component in strat_components[1:]:
-            df['strat_key'] = df['strat_key'] + '_' + component
-    
-    # Check for single-sample groups and handle them
-    strat_counts = df['strat_key'].value_counts()
-    single_sample_groups = strat_counts[strat_counts == 1].index.tolist()
-    
-    if single_sample_groups:
-        print(f"Warning: Found {len(single_sample_groups)} single-sample groups: {single_sample_groups}")
-        print("These samples will be assigned to train set to enable splitting.")
-        
-        # Assign single-sample groups to train set
-        single_sample_mask = df['strat_key'].isin(single_sample_groups)
-        single_samples = df[single_sample_mask].copy()
-        remaining_df = df[~single_sample_mask].copy()
-        
-        # Split remaining data
-        if len(remaining_df) > 0:
-            train_df, test_df = train_test_split(
-                remaining_df,
-                test_size=args.test_size,
-                stratify=remaining_df['strat_key'],
-                random_state=args.random_state
-            )
-            # Add single samples to train set
-            train_df = pd.concat([train_df, single_samples], ignore_index=True)
-        else:
-            # Fallback: random split if stratification fails
-            train_df, test_df = train_test_split(df, test_size=args.test_size, random_state=args.random_state)
-    else:
-        # Normal stratified split
-        train_df, test_df = train_test_split(
-            df,
-            test_size=args.test_size,
-            stratify=df['strat_key'],
-            random_state=args.random_state
-        )
+    # Apply stratification strategy
+    train_df, test_df = apply_stratification_strategy(
+        df, args.stratify_by, args.stratification_strategy, 
+        args.test_size, args.random_state, args.age_bins, args.min_samples_per_group
+    )
     
     # Remove temporary columns (only if they exist)
     temp_cols = ['strat_key']

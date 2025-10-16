@@ -56,31 +56,38 @@ Reported stats for `proteomic_encoder_data.csv`:
 
 **Script**: `generate_proteomic_encoder_train_test_split.py`
 
-**Purpose**: Creates stratified train/test splits for proteomic encoder training with configurable demographic stratification
+**Purpose**: Creates stratified train/test splits for proteomic encoder training with advanced demographic stratification strategies
 
 **Key Features**:
+- **Multiple stratification strategies**: `strict`, `relaxed`, `hierarchical`, `balanced` (default)
 - **Configurable stratification**: Choose any combination of diagnosis, age, and sex
-- **Flexible test size**: Adjustable test set proportion (default: 20%)
-- **Comprehensive balance verification**: Only checks stratified features
-- **Single-sample handling**: Automatically assigns single-sample groups to training set. But shouldn't happen 
-- **Reproducible**: Configurable random seed
+- **Adaptive age binning**: Ensures balanced distribution across age groups
+- **Intelligent fallback**: Automatically handles insufficient sample groups
+- **Comprehensive balance verification**: Detailed reporting of split quality
+- **Flexible parameters**: Adjustable test size, age bins, minimum samples per group
 
 **Usage Examples**:
 
 ```bash
-# Default: stratify by all demographics (diagnosis, age, sex)
+# Default: balanced strategy with all demographics
 uv run python generate_proteomic_encoder_train_test_split.py
 
-# Stratify by diagnosis only
-uv run python generate_proteomic_encoder_train_test_split.py --stratify-by diagnosis
+# Stratify by diagnosis and age only (Current: default)
+uv run python generate_proteomic_encoder_train_test_split.py --stratify-by diagnosis age --stratification-stratefy balanced --age-bins 3 --min-samples-per-group 2 --test-size 0.20
 
-# Stratify by diagnosis and age only
-uv run python generate_proteomic_encoder_train_test_split.py --stratify-by diagnosis age
+# Use strict strategy (fails if impossible)
+uv run python generate_proteomic_encoder_train_test_split.py --stratification-strategy strict
+
+# Custom parameters
+uv run python generate_proteomic_encoder_train_test_split.py --stratify-by diagnosis age --age-bins 3 --test-size 0.15
+```
 
 **Command-line Options**:
-
 - `--stratify-by`: Demographic features to stratify by (`diagnosis`, `age`, `sex`)
+- `--stratification-strategy`: Strategy to use (`strict`, `relaxed`, `hierarchical`, `balanced`)
 - `--test-size`: Proportion for test set (default: 0.20)
+- `--age-bins`: Number of age bins (default: 4)
+- `--min-samples-per-group`: Minimum samples per group (default: 2)
 - `--random-state`: Random seed (default: 42)
 - `--input-path`: Input CSV file path
 ## Merge demographics with proteomic data
