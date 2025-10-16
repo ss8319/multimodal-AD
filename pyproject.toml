@@ -23,6 +23,7 @@ dependencies = [
     "pytorch-lightning==2.3.3",
     "torchmetrics==1.8.2",
     "wandb>=0.22.2",
+    "xgboost>=3.0.5",
 ]
 
 [project.optional-dependencies]
