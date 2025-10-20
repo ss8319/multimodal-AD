@@ -12,6 +12,7 @@ Key differences from fusion evaluation:
 import argparse
 import json
 import pickle
+import sys
 import numpy as np
 import pandas as pd
 from pathlib import Path
@@ -23,12 +24,17 @@ from sklearn.metrics import (
     balanced_accuracy_score
 )
 
-# Feature alignment helper
-import sys as _sys
-from pathlib import Path as _P
-_protein_mod_path = str(_P(__file__).parent.parent.parent / "protein")
-if _protein_mod_path not in _sys.path:
-    _sys.path.insert(0, _protein_mod_path)
+# Centralized function to add protein module to path
+def add_protein_module_to_path():
+    """Add protein module to Python path for imports"""
+    protein_path = str(Path(__file__).parent.parent.parent / "protein")
+    if protein_path not in sys.path:
+        sys.path.insert(0, protein_path)
+
+# Add protein module to path once at module level
+add_protein_module_to_path()
+
+# Now import protein-specific modules
 from feature_utils import align_features_to_scaler, load_scaler_feature_columns
 
 
@@ -86,13 +92,9 @@ def load_protein_model(model_path, model_type='nn'):
     
     # Import PyTorch and model definitions
     import torch
-    import sys
-    from pathlib import Path as P
     
-    # Add protein module to path for model import
-    protein_path = str(P(__file__).parent.parent.parent / "protein")
-    if protein_path not in sys.path:
-        sys.path.insert(0, protein_path)
+    # Get device for model loading
+    device = get_device()
     
     if model_type == 'nn':
         # Load PyTorch Neural Network model
@@ -127,6 +129,7 @@ def load_protein_model(model_path, model_type='nn'):
         
         # Load weights
         model.load_state_dict(checkpoint['model_state_dict'])
+        model.to(device)  # Move model to appropriate device
         model.eval()
         
         print(f"Loaded pre-trained Neural Network model from {model_path}")
@@ -158,6 +161,7 @@ def load_protein_model(model_path, model_type='nn'):
         
         # Load weights
         model.load_state_dict(checkpoint.get('model_state_dict', checkpoint))
+        model.to(device)  # Move model to appropriate device
         model.eval()
         
         print(f"Loaded pre-trained Transformer model from {model_path}")
@@ -169,12 +173,78 @@ def load_protein_model(model_path, model_type='nn'):
         raise ValueError(f"Unsupported model_type: {model_type}. Use 'nn' or 'transformer'")
 
 
+def validate_model_scaler_compatibility(model, scaler, n_features):
+    """Ensure model and scaler are compatible
+    
+    Args:
+        model: Loaded PyTorch model
+        scaler: Pre-fitted StandardScaler
+        n_features: Number of features expected by model
+        
+    Raises:
+        ValueError: If model and scaler feature counts don't match
+    """
+    if hasattr(scaler, 'n_features_in_') and n_features != scaler.n_features_in_:
+        raise ValueError(
+            f"Feature mismatch: model expects {n_features} features, "
+            f"but scaler was fitted with {scaler.n_features_in_} features"
+        )
+
+
+def validate_data_integrity(X, y, fold_idx):
+    """Validate data integrity for a fold
+    
+    Args:
+        X: Feature matrix
+        y: Labels
+        fold_idx: Fold index
+        
+    Raises:
+        ValueError: If data integrity issues found
+    """
+    if len(X) != len(y):
+        raise ValueError(f"Fold {fold_idx}: Feature count ({len(X)}) != label count ({len(y)})")
+    
+    if len(np.unique(y)) < 2:
+        raise ValueError(f"Fold {fold_idx}: Only one class present in labels: {np.unique(y)}")
+    
+    if np.any(np.isnan(X)):
+        raise ValueError(f"Fold {fold_idx}: NaN values found in features")
+    
+    if np.any(np.isinf(X)):
+        raise ValueError(f"Fold {fold_idx}: Infinite values found in features")
+
+
+def get_device():
+    """Get the appropriate device for PyTorch operations"""
+    import torch
+    if torch.cuda.is_available():
+        device = torch.device('cuda')
+        print(f"  Using GPU: {torch.cuda.get_device_name()}")
+    else:
+        device = torch.device('cpu')
+        print(f"  Using CPU")
+    return device
+
+
 def load_scaler(scaler_path):
-    """Load pre-fitted scaler"""
-    with open(scaler_path, 'rb') as f:
-        scaler = pickle.load(f)
-    print(f"Loaded pre-fitted scaler from {scaler_path}")
-    return scaler
+    """Load pre-fitted scaler with error handling"""
+    try:
+        with open(scaler_path, 'rb') as f:
+            scaler = pickle.load(f)
+        print(f"Loaded pre-fitted scaler from {scaler_path}")
+        
+        # Validate scaler has required attributes
+        if not hasattr(scaler, 'transform'):
+            raise ValueError(f"Invalid scaler object: missing 'transform' method")
+        
+        return scaler
+    except FileNotFoundError:
+        raise FileNotFoundError(f"Scaler file not found: {scaler_path}")
+    except pickle.UnpicklingError as e:
+        raise ValueError(f"Failed to load scaler from {scaler_path}: {e}")
+    except Exception as e:
+        raise RuntimeError(f"Unexpected error loading scaler from {scaler_path}: {e}")
 
 
 def evaluate_fold_test(model, scaler, X_test, y_test, fold_idx, model_type='nn'):
@@ -198,12 +268,15 @@ def evaluate_fold_test(model, scaler, X_test, y_test, fold_idx, model_type='nn')
         import torch
         import torch.nn.functional as F
         
+        # Get device from model
+        device = next(model.parameters()).device
+        
         model.eval()
         with torch.no_grad():
-            X_test_tensor = torch.FloatTensor(X_test_scaled)
+            X_test_tensor = torch.FloatTensor(X_test_scaled).to(device)
             logits = model(X_test_tensor)
-            test_probs = F.softmax(logits, dim=1)[:, 1].numpy()
-            test_preds = torch.argmax(logits, dim=1).numpy()
+            test_probs = F.softmax(logits, dim=1)[:, 1].cpu().numpy()
+            test_preds = torch.argmax(logits, dim=1).cpu().numpy()
     
     else:
         raise ValueError(f"Unsupported model_type: {model_type}. Use 'nn' or 'transformer'")
@@ -268,6 +341,25 @@ def print_fold_results(results, fold_idx):
     print(f"  Confusion Matrix:")
     print(f"    TN={cm[0,0]}, FP={cm[0,1]}")
     print(f"    FN={cm[1,0]}, TP={cm[1,1]}")
+
+
+def serialize_metrics(metrics):
+    """Convert NaN to None for JSON serialization
+    
+    Args:
+        metrics: Dictionary with metric statistics
+        
+    Returns:
+        dict: JSON-serializable metrics dictionary
+    """
+    result = {}
+    for k, v in metrics.items():
+        result[k] = {
+            'mean': None if np.isnan(v['mean']) else float(v['mean']),
+            'std': None if np.isnan(v['std']) else float(v['std']),
+            'values': [None if np.isnan(x) else float(x) for x in v['values']]
+        }
+    return result
 
 
 def aggregate_results(fold_results):
@@ -337,6 +429,18 @@ def main(args):
     
     scaler_path = normalize_path(args.scaler_path)
     scaler = load_scaler(scaler_path)
+    
+    # Validate model-scaler compatibility
+    if args.model_type == 'nn':
+        # Extract n_features from model config for validation
+        import torch
+        checkpoint = torch.load(model_path, map_location='cpu')
+        model_config = checkpoint.get('model_config', {})
+        n_features = model_config.get('n_features')
+        if n_features:
+            validate_model_scaler_compatibility(None, scaler, n_features)
+            print(f"  ✅ Model-scaler compatibility validated ({n_features} features)")
+    
     print()
     
     # Load CV splits from fusion experiment
@@ -367,10 +471,15 @@ def main(args):
         protein_df = protein_df.drop(columns=zero_var_cols)
     
     # Align to scaler's training feature order if available
-    scaler_features = load_scaler_feature_columns(Path(args.model_path).parents[1]) if args.model_type == 'mlp' else load_scaler_feature_columns(Path(args.scaler_path).parents[0])
-    # Note: For both models, scaler is saved in the run dir; attempt to resolve from provided paths
+    # Determine scaler directory from scaler path (more direct and consistent)
+    scaler_dir = Path(args.scaler_path).parent
+    scaler_features = load_scaler_feature_columns(scaler_dir)
+    
     if scaler_features:
         protein_df = align_features_to_scaler(protein_df, scaler, scaler_features)
+        print(f"  Aligned features to scaler's training order ({len(scaler_features)} features)")
+    else:
+        print(f"  No scaler feature columns found in {scaler_dir}")
     
     X = protein_df.values
     y = (df['research_group'] == 'AD').astype(int).values
@@ -392,6 +501,14 @@ def main(args):
         X_test, y_test = X[test_idx], y[test_idx]
         
         print(f"  Test:  {len(test_idx)} samples (AD={y_test.sum()}, CN={(1-y_test).sum()})")
+        
+        # Validate data integrity for this fold
+        try:
+            validate_data_integrity(X_test, y_test, fold_idx)
+            print(f"  ✅ Data integrity validated")
+        except ValueError as e:
+            print(f"  ⚠️  Data validation warning: {e}")
+            print(f"  Continuing with fold evaluation...")
         
         # Evaluate fold (inference only, no training)
         results = evaluate_fold_test(
@@ -422,7 +539,7 @@ def main(args):
             'data_csv': args.data_csv,
             'cv_splits_json': args.cv_splits_json,
             'fold_results': fold_results,
-            'aggregated_metrics': {k: {'mean': v['mean'], 'std': v['std']} for k, v in aggregated.items()},
+            'aggregated_metrics': serialize_metrics(aggregated),
             'aggregated_cm': total_cm.tolist()
         }
         
