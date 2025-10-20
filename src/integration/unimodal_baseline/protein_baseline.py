@@ -35,47 +35,98 @@ from feature_utils import align_features_to_scaler, load_scaler_feature_columns
 
 def load_cv_splits(cv_splits_path):
     """Load CV splits from fusion experiment"""
-    with open(cv_splits_path, 'r') as f:
-        cv_splits = json.load(f)
+    # Handle relative paths that might be prefixed with project name
+    if isinstance(cv_splits_path, str) and cv_splits_path.startswith('multimodal-AD/'):
+        # If path starts with project name but we're already in project dir
+        cwd = Path.cwd()
+        if cwd.name == 'multimodal-AD' or str(cwd).endswith('/multimodal-AD'):
+            # Strip the project prefix to avoid duplication
+            cv_splits_path = cv_splits_path.replace('multimodal-AD/', '', 1)
+            print(f"  Removed duplicate project prefix from path")
     
-    print(f"Loaded {len(cv_splits)} CV folds from {cv_splits_path}")
-    return cv_splits
+    # Normalize to absolute path
+    cv_splits_path = Path(cv_splits_path).expanduser().resolve()
+    print(f"  Using CV splits path: {cv_splits_path}")
+    
+    try:
+        with open(cv_splits_path, 'r') as f:
+            cv_splits = json.load(f)
+        
+        print(f"  Loaded {len(cv_splits)} CV folds from {cv_splits_path}")
+        return cv_splits
+    except FileNotFoundError:
+        print(f"  ERROR: CV splits file not found: {cv_splits_path}")
+        print(f"  Current working directory: {Path.cwd()}")
+        raise
 
 
-def load_protein_model(model_path, model_type='mlp'):
+def load_protein_model(model_path, model_type='nn'):
     """Load pre-trained protein model
     
     Args:
-        model_path: Path to model file (.pkl for MLP, .pth for Transformer)
-        model_type: 'mlp' or 'transformer'
+        model_path: Path to model file (.pth for PyTorch models)
+        model_type: 'nn' (PyTorch Neural Network) or 'transformer'
     """
     model_path = Path(model_path)
     
-    if model_type == 'mlp':
-        # Load sklearn MLP model
-        with open(model_path, 'rb') as f:
-            model = pickle.load(f)
-        print(f"Loaded pre-trained MLP model from {model_path}")
-        print(f"  Model type: {type(model).__name__}")
+    # Import PyTorch and model definitions
+    import torch
+    import sys
+    from pathlib import Path as P
+    
+    # Add protein module to path for model import
+    protein_path = str(P(__file__).parent.parent.parent / "protein")
+    if protein_path not in sys.path:
+        sys.path.insert(0, protein_path)
+    
+    if model_type == 'nn':
+        # Load PyTorch Neural Network model
+        from model import NeuralNetwork
+        
+        # Load checkpoint
+        checkpoint = torch.load(model_path, map_location='cpu')
+        
+        # Recreate model with saved config
+        if 'model_config' not in checkpoint:
+            raise ValueError("Model checkpoint missing 'model_config'. Cannot load Neural Network model.")
+            
+        model_config = checkpoint['model_config']
+        
+        # Extract architecture parameters
+        n_features = model_config.get('n_features')
+        hidden_sizes = model_config.get('hidden_sizes', (128, 64))
+        dropout = model_config.get('dropout', 0.2)
+        
+        if n_features is None:
+            raise ValueError(
+                "model_config missing 'n_features'. Cannot reconstruct Neural Network.\n"
+                "Please retrain the protein model with the updated code to include n_features in the checkpoint."
+            )
+        
+        # Recreate model
+        model = NeuralNetwork(
+            n_features=n_features,
+            hidden_sizes=hidden_sizes,
+            dropout=dropout
+        )
+        
+        # Load weights
+        model.load_state_dict(checkpoint['model_state_dict'])
+        model.eval()
+        
+        print(f"Loaded pre-trained Neural Network model from {model_path}")
+        print(f"  Model architecture: n_features={n_features}, hidden_sizes={hidden_sizes}, dropout={dropout}")
+        
         return model
     
     elif model_type == 'transformer':
         # Load PyTorch Transformer model
-        import torch
-        import sys
-        from pathlib import Path as P
-        
-        # Add protein module to path for model import
-        protein_path = str(P(__file__).parent.parent.parent / "protein")
-        if protein_path not in sys.path:
-            sys.path.insert(0, protein_path)
-        
         from model import ProteinTransformer
         
         # Load checkpoint
         checkpoint = torch.load(model_path, map_location='cpu')
         
-        # Recreate model with saved config (consistent with extract_latents.py and runs/README.md)
+        # Recreate model with saved config
         if 'model_config' not in checkpoint:
             raise ValueError("Model checkpoint missing 'model_config'. Cannot load transformer model.")
             
@@ -100,7 +151,7 @@ def load_protein_model(model_path, model_type='mlp'):
         return model
     
     else:
-        raise ValueError(f"Unsupported model_type: {model_type}. Use 'mlp' or 'transformer'")
+        raise ValueError(f"Unsupported model_type: {model_type}. Use 'nn' or 'transformer'")
 
 
 def load_scaler(scaler_path):
@@ -111,40 +162,36 @@ def load_scaler(scaler_path):
     return scaler
 
 
-def evaluate_fold_test(model, scaler, X_test, y_test, fold_idx, model_type='mlp'):
+def evaluate_fold_test(model, scaler, X_test, y_test, fold_idx, model_type='nn'):
     """Evaluate pre-trained model on test set for a single fold
     
     Args:
-        model: Pre-trained model (sklearn or PyTorch)
+        model: Pre-trained model (PyTorch Neural Network or Transformer)
         scaler: Pre-fitted StandardScaler
         X_test: Test features
         y_test: Test labels
         fold_idx: Fold index
-        model_type: 'mlp' or 'transformer'
+        model_type: 'nn' or 'transformer'
     """
     
     # Apply pre-fitted scaler to test data
     X_test_scaled = scaler.transform(X_test)
     
     # Run inference (no training)
-    if model_type == 'mlp':
-        # sklearn model
-        test_preds = model.predict(X_test_scaled)
-        test_probs = model.predict_proba(X_test_scaled)[:, 1] if hasattr(model, 'predict_proba') else test_preds
-    
-    elif model_type == 'transformer':
-        # PyTorch model
+    if model_type in ['nn', 'transformer']:
+        # PyTorch model (both Neural Network and Transformer)
         import torch
+        import torch.nn.functional as F
         
         model.eval()
         with torch.no_grad():
             X_test_tensor = torch.FloatTensor(X_test_scaled)
             logits = model(X_test_tensor)
-            test_probs = torch.softmax(logits, dim=1)[:, 1].numpy()
+            test_probs = F.softmax(logits, dim=1)[:, 1].numpy()
             test_preds = torch.argmax(logits, dim=1).numpy()
     
     else:
-        raise ValueError(f"Unsupported model_type: {model_type}")
+        raise ValueError(f"Unsupported model_type: {model_type}. Use 'nn' or 'transformer'")
     
     # Calculate metrics
     test_acc = accuracy_score(y_test, test_preds)
@@ -269,10 +316,32 @@ def main(args):
     print()
     
     # Load pre-trained model and scaler (once)
-    model_path = Path(args.model_path)
+    # Handle relative paths that might be prefixed with project name
+    model_path = args.model_path
+    if isinstance(model_path, str) and model_path.startswith('multimodal-AD/'):
+        # If path starts with project name but we're already in project dir
+        cwd = Path.cwd()
+        if cwd.name == 'multimodal-AD' or str(cwd).endswith('/multimodal-AD'):
+            # Strip the project prefix to avoid duplication
+            model_path = model_path.replace('multimodal-AD/', '', 1)
+            print(f"  Removed duplicate project prefix from model path")
+    
+    model_path = Path(model_path).expanduser().resolve()
+    print(f"  Using model path: {model_path}")
     model = load_protein_model(model_path, model_type=args.model_type)
     
-    scaler_path = Path(args.scaler_path)
+    # Handle relative paths for scaler
+    scaler_path = args.scaler_path
+    if isinstance(scaler_path, str) and scaler_path.startswith('multimodal-AD/'):
+        # If path starts with project name but we're already in project dir
+        cwd = Path.cwd()
+        if cwd.name == 'multimodal-AD' or str(cwd).endswith('/multimodal-AD'):
+            # Strip the project prefix to avoid duplication
+            scaler_path = scaler_path.replace('multimodal-AD/', '', 1)
+            print(f"  Removed duplicate project prefix from scaler path")
+    
+    scaler_path = Path(scaler_path).expanduser().resolve()
+    print(f"  Using scaler path: {scaler_path}")
     scaler = load_scaler(scaler_path)
     print()
     
@@ -379,20 +448,20 @@ if __name__ == "__main__":
     parser.add_argument(
         "--model-type",
         type=str,
-        choices=['mlp', 'transformer'],
-        default='mlp',
-        help="Type of protein model: 'mlp' or 'transformer'"
+        choices=['nn', 'transformer'],
+        default='nn',
+        help="Type of protein model: 'nn' (PyTorch Neural Network) or 'transformer'"
     )
     parser.add_argument(
         "--model-path",
         type=str,
-        default="src/protein/runs/run_20251003_133215/models/neural_network.pkl",
-        help="Path to pre-trained protein model (.pkl for MLP, .pth for Transformer)"
+        default="src/protein/runs/run_20251016_205054/models/neural_network.pth",
+        help="Path to pre-trained protein model (.pth for PyTorch models)"
     )
     parser.add_argument(
         "--scaler-path",
         type=str,
-        default="src/protein/runs/run_20251003_133215/scaler.pkl",
+        default="src/protein/runs/run_20251016_205054/scaler.pkl",
         help="Path to pre-fitted scaler (.pkl file)"
     )
     parser.add_argument(
