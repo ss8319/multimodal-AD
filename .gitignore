@@ -31,3 +31,6 @@ AD_CN/proteomics/Biomarkers Consortium Plasma Proteomics MRM/MRI/Zip Files/
 *.zip
 *.xlsx
 *.xls
+
+# Ignore protein training runs
+src/protein/runs
