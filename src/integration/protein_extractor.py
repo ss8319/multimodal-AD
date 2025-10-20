@@ -1,9 +1,10 @@
 """
 Protein feature extractor for multimodal dataset
-Extracts latents from trained protein models (MLPClassifier or ProteinTransformer)
+Extracts latents from trained protein models (PyTorch NeuralNetwork or ProteinTransformer)
 """
 
 import torch
+import torch.nn as nn
 import pandas as pd
 import numpy as np
 import pickle
@@ -11,12 +12,12 @@ from pathlib import Path
 import sys
 
 from sklearn.preprocessing import StandardScaler
-from sklearn.neural_network import MLPClassifier
 
-# Import ProteinTransformer (will be loaded on demand)
+# Import PyTorch models (will be loaded on demand)
 try:
-    from src.protein.model import ProteinTransformer
+    from src.protein.model import NeuralNetwork, ProteinTransformer
 except ImportError:
+    NeuralNetwork = None
     ProteinTransformer = None
 
 # Feature alignment utilities
@@ -37,7 +38,18 @@ class ProteinLatentExtractor:
             run_dir: Path to protein model run directory
             device: Device for PyTorch models
         """
-        self.run_dir = Path(run_dir)
+        # Handle relative paths that might be prefixed with project name
+        if isinstance(run_dir, str) and run_dir.startswith('multimodal-AD/'):
+            # If path starts with project name but we're already in project dir
+            cwd = Path.cwd()
+            if cwd.name == 'multimodal-AD' or str(cwd).endswith('/multimodal-AD'):
+                # Strip the project prefix to avoid duplication
+                run_dir = run_dir.replace('multimodal-AD/', '', 1)
+                print(f"  Removed duplicate project prefix from path")
+        
+        # Normalize to absolute path to avoid CWD-dependent resolution in SLURM/jobs
+        self.run_dir = Path(run_dir).expanduser().resolve()
+        print(f"  ProteinLatentExtractor using run_dir: {self.run_dir}")
         self.device = device
         
         # Load preprocessing scaler (if available)
@@ -56,23 +68,56 @@ class ProteinLatentExtractor:
             self.scaler_feature_columns = None
         
         # Initialize models (will be loaded on demand)
-        self.mlp_model = None
+        self.nn_model = None
         self.transformer_model = None
         
-    def load_mlp_model(self):
-        """Load MLPClassifier model"""
-        if self.mlp_model is not None:
-            return self.mlp_model
+    def load_nn_model(self):
+        """Load PyTorch NeuralNetwork model"""
+        if self.nn_model is not None:
+            return self.nn_model
             
-        model_path = self.run_dir / "models" / "neural_network.pkl"
+        model_path = self.run_dir / "models" / "neural_network.pth"
         if not model_path.exists():
-            raise FileNotFoundError(f"MLP model not found: {model_path}")
+            raise FileNotFoundError(
+                f"Neural Network model not found: {model_path} (cwd={Path.cwd()})"
+            )
         
-        with open(model_path, 'rb') as f:
-            self.mlp_model = pickle.load(f)
+        # Check if NeuralNetwork is available
+        if NeuralNetwork is None:
+            raise ImportError("NeuralNetwork not available. Make sure src.protein.model is accessible.")
         
-        print(f"  Loaded MLP model from {model_path}")
-        return self.mlp_model
+        # Load model checkpoint
+        checkpoint = torch.load(model_path, map_location=self.device)
+        
+        # Require model_config for deterministic reconstruction
+        if 'model_config' not in checkpoint:
+            raise ValueError("Model checkpoint missing 'model_config'. Cannot load Neural Network model.")
+        config = checkpoint['model_config']
+        
+        # Extract architecture parameters
+        n_features = config.get('n_features')
+        hidden_sizes = config.get('hidden_sizes', (128, 64))
+        dropout = config.get('dropout', 0.2)
+        
+        if n_features is None:
+            raise ValueError(
+                "model_config missing 'n_features'. Cannot reconstruct Neural Network.\n"
+                "Please retrain the protein model with the updated code to include n_features in the checkpoint."
+            )
+        
+        # Reconstruct model
+        self.nn_model = NeuralNetwork(
+            n_features=n_features,
+            hidden_sizes=hidden_sizes,
+            dropout=dropout
+        )
+        self.nn_model.load_state_dict(checkpoint['model_state_dict'])
+        self.nn_model.to(self.device)
+        self.nn_model.eval()
+        
+        print(f"  Loaded Neural Network model from {model_path}")
+        print(f"    Architecture: n_features={n_features}, hidden_sizes={hidden_sizes}, dropout={dropout}")
+        return self.nn_model
     
     def _infer_model_config(self, state_dict):
         """
@@ -147,41 +192,89 @@ class ProteinLatentExtractor:
         scaled_values = self.scaler.transform(protein_values_2d)
         return scaled_values.flatten()
     
-    def extract_mlp_latents(self, protein_values, layer_name='hidden_layer_2', feature_names=None):
+    def extract_nn_latents(self, protein_values, layer_name='last_hidden_layer', feature_names=None):
         """
-        Extract latents from MLPClassifier model
+        Extract latents from PyTorch NeuralNetwork model
         
         Args:
             protein_values: Raw protein values [n_features]
-            layer_name: Which hidden layer to extract ('hidden_layer_1' or 'hidden_layer_2')
+            layer_name: Which hidden layer to extract from
+                       Options: 'hidden_layer_1', 'hidden_layer_2', 'last_hidden_layer' (default)
+                       'last_hidden_layer' extracts from the final hidden layer before classification
         
         Returns:
             Latent features from specified layer
         """
         # Load model if not already loaded
-        model = self.load_mlp_model()
+        model = self.load_nn_model()
         
         # Preprocess data
         X_scaled = self.preprocess_protein_data(protein_values, feature_names)
         
-        # Extract features from hidden layers
-        # MLPClassifier stores weights in coefs_ and intercepts_
-        if layer_name == 'hidden_layer_1':
-            # First hidden layer
-            layer_output = np.dot(X_scaled, model.coefs_[0]) + model.intercepts_[0]
-            # Apply activation function (ReLU for MLPClassifier)
-            layer_output = np.maximum(0, layer_output)
-        elif layer_name == 'hidden_layer_2':
-            # Second hidden layer
-            layer1_output = np.dot(X_scaled, model.coefs_[0]) + model.intercepts_[0]
-            layer1_output = np.maximum(0, layer1_output)  # ReLU
-            
-            layer_output = np.dot(layer1_output, model.coefs_[1]) + model.intercepts_[1]
-            layer_output = np.maximum(0, layer_output)  # ReLU
-        else:
-            raise ValueError(f"Unknown layer: {layer_name}")
+        # Convert to tensor
+        X_tensor = torch.FloatTensor(X_scaled).unsqueeze(0).to(self.device)  # [1, n_features]
         
-        return layer_output.astype(np.float32)
+        # The NeuralNetwork architecture is:
+        # Sequential(
+        #     Linear(n_features, hidden_sizes[0]),  # Layer 0
+        #     ReLU,                                  # Layer 1
+        #     Dropout,                              # Layer 2
+        #     Linear(hidden_sizes[0], hidden_sizes[1]),  # Layer 3
+        #     ReLU,                                  # Layer 4
+        #     Dropout,                              # Layer 5
+        #     ... (repeat for more hidden layers)
+        #     Linear(hidden_sizes[-1], 2)           # Final classification layer
+        # )
+        
+        # Map layer names to indices
+        # For hidden_sizes=(128, 64):
+        # - hidden_layer_1: after layer 2 (first ReLU+Dropout) → output (128,)
+        # - hidden_layer_2: after layer 5 (second ReLU+Dropout) → output (64,)
+        # - last_hidden_layer: same as the last hidden layer (layer 5 for 2 hidden layers)
+        
+        # Calculate layer indices based on architecture
+        n_hidden_layers = len(model.net) // 3 - 1  # Each hidden layer is 3 modules (Linear, ReLU, Dropout)
+        
+        if layer_name == 'last_hidden_layer':
+            # Extract from last hidden layer (before classification head)
+            target_layer_idx = len(model.net) - 2  # Second to last (before classification Linear)
+        elif layer_name.startswith('hidden_layer_'):
+            # Extract layer number from name
+            try:
+                layer_num = int(layer_name.split('_')[-1])
+                if layer_num < 1 or layer_num > n_hidden_layers:
+                    raise ValueError(f"Invalid layer number {layer_num}. Model has {n_hidden_layers} hidden layers.")
+                # Each hidden layer group is 3 modules (Linear, ReLU, Dropout)
+                # Layer 1 ends at index 2, Layer 2 ends at index 5, etc.
+                target_layer_idx = (layer_num * 3) - 1
+            except (IndexError, ValueError) as e:
+                raise ValueError(f"Invalid layer name format: {layer_name}. Use 'hidden_layer_N' where N is 1-{n_hidden_layers}")
+        else:
+            raise ValueError(f"Unknown layer: {layer_name}. Use 'hidden_layer_1', 'hidden_layer_2', or 'last_hidden_layer'")
+        
+        # Extract features using forward hook
+        activations = {}
+        
+        def get_activation(name):
+            def hook(module, input, output):
+                activations[name] = output.detach().cpu().numpy().flatten()
+            return hook
+        
+        # Register hook at target layer
+        hook_handle = model.net[target_layer_idx].register_forward_hook(get_activation('target_layer'))
+        
+        # Forward pass
+        with torch.no_grad():
+            _ = model(X_tensor)
+        
+        # Remove hook
+        hook_handle.remove()
+        
+        # Return the extracted activations
+        if 'target_layer' in activations:
+            return activations['target_layer'].astype(np.float32)
+        else:
+            raise RuntimeError(f"Failed to extract activations for {layer_name} at index {target_layer_idx}")
     
     def extract_transformer_latents(self, protein_values, layer_name='transformer_embeddings', feature_names=None):
         """
@@ -241,8 +334,8 @@ if __name__ == "__main__":
     # Test the protein extractor
     print("Testing ProteinLatentExtractor...")
     
-    # Paths
-    run_dir = "/home/ssim0068/multimodal-AD/src/protein/runs/run_20251003_133215"
+    # Paths - update this to your actual run directory
+    run_dir = "/home/ssim0068/multimodal-AD/src/protein/runs/run_20251016_194651"
     
     # Create extractor
     extractor = ProteinLatentExtractor(run_dir, device='cpu')
@@ -250,13 +343,17 @@ if __name__ == "__main__":
     # Test with dummy protein data (320 features)
     dummy_protein = np.random.randn(320).astype(np.float32)
     
-    print("\nTesting MLP latent extraction...")
+    print("\nTesting Neural Network latent extraction...")
     try:
-        mlp_latents = extractor.extract_mlp_latents(dummy_protein, 'hidden_layer_2')
-        print(f"  MLP hidden_layer_2 shape: {mlp_latents.shape}")
-        print(f"  Sample values: {mlp_latents[:5]}")
+        # Test different layer names
+        for layer_name in ['hidden_layer_1', 'hidden_layer_2', 'last_hidden_layer']:
+            nn_latents = extractor.extract_nn_latents(dummy_protein, layer_name)
+            print(f"  NN {layer_name} shape: {nn_latents.shape}")
+            print(f"  Sample values: {nn_latents[:5]}")
     except Exception as e:
         print(f"  Error: {e}")
+        import traceback
+        traceback.print_exc()
     
     print("\nTesting Transformer latent extraction...")
     try:
@@ -265,5 +362,7 @@ if __name__ == "__main__":
         print(f"  Sample values: {transformer_latents[:5]}")
     except Exception as e:
         print(f"  Error: {e}")
+        import traceback
+        traceback.print_exc()
     
     print("\n✅ Protein extractor test completed!")

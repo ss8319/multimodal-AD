@@ -281,13 +281,13 @@ def main():
         # Data paths
         'data_csv': '/home/ssim0068/data/multimodal-dataset/all.csv',  # All data for CV
         'brainiac_checkpoint': '/home/ssim0068/code/multimodal-AD/BrainIAC/src/checkpoints/BrainIAC.ckpt',
-        'protein_run_dir': '/home/ssim0068/multimodal-AD/src/protein/runs/run_20251003_133215',
+        'protein_run_dir': '/home/ssim0068/multimodal-AD/src/protein/runs/run_20251016_205054',
         'protein_latents_dir': None,
         
         # Model config
-        'protein_model_type': 'mlp',  # 'mlp' or 'transformer'
-        'protein_layer': 'hidden_layer_2',  # 'hidden_layer_2' for MLP, 'transformer_embeddings' for Transformer
-        'fusion_model_type': 'simple',  # 'simple' or 'weighted_attention'
+        'protein_model_type': 'nn',  # 'nn' (Neural Network) or 'transformer'
+        'protein_layer': 'last_hidden_layer',  # 'last_hidden_layer' for NN, 'transformer_embeddings' for Transformer
+        'fusion_model_type': 'weighted_attention',  # 'simple' or 'weighted_attention'
         'hidden_dim': 128, #params for the fusion model
         'fusion_dim': 128, #params for weighted fusion model (shared embedding dimension)
         'dropout': 0.3, #params for the fusion model
