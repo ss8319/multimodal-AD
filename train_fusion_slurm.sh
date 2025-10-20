@@ -2,7 +2,7 @@
 # Tip: set a meaningful job name at submission time, e.g.
 #   sbatch --job-name=fusion_mlp_hidden_layer_2 train_fusion_slurm.sh
 # The %x token below will be replaced by the job name
-#SBATCH --job-name=fusion_train
+#SBATCH --job-name=fusion_train_NN
 #SBATCH --output=logs/%x_%j.out
 #SBATCH --error=logs/%x_%j.err
 #SBATCH --time=4:00:00
@@ -35,22 +35,17 @@ echo "Scikit-learn version: $(uv run python -c 'import sklearn; print(sklearn.__
 
 # Check if wandb is available, install if needed
 echo "Checking for wandb..."
-HAS_WANDB=$(uv run python -c "try: import wandb; print('Yes'); except ImportError: print('No')")
+HAS_WANDB=$(uv run python -c "import importlib.util; print('Yes' if importlib.util.find_spec('wandb') is not None else 'No')" 2>/dev/null || echo "No")
 echo "wandb available: $HAS_WANDB"
 
 # Set up wandb if available
-if [ "$HAS_WANDB" = "Yes" ]; then
-    echo "Setting up wandb logging..."
-    # You can set your API key here or use wandb login in advance
-    # export WANDB_API_KEY="your-api-key-here"
-    export WANDB_PROJECT="multimodal-ad"
-    export WANDB_ENTITY="your-username"  # Change this to your wandb username
-    export WANDB_GROUP="cv_$(date +%Y%m%d_%H%M%S)"
-    echo "wandb configuration: project=$WANDB_PROJECT, entity=$WANDB_ENTITY, group=$WANDB_GROUP"
-else
-    echo "wandb not available, continuing without logging"
-    export WANDB_MODE="disabled"  # Disable wandb if not available
-fi
+echo "Setting up wandb logging..."
+# You can set your API key here or use wandb login in advance
+# export WANDB_API_KEY="your-api-key-here"
+export WANDB_PROJECT="multimodal-ad"
+# export WANDB_ENTITY="your-username"  # Remove placeholder; set this in environment if needed
+export WANDB_GROUP="cv_$(date +%Y%m%d_%H%M%S)"
+echo "wandb configuration: project=$WANDB_PROJECT, entity=${WANDB_ENTITY:-<unset>}, group=$WANDB_GROUP"
 
 # Run training using uv environment
 echo "Starting multimodal fusion training with merged uv environment..."
