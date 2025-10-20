@@ -26,6 +26,67 @@ from fusion_model import get_model, get_weighted_fusion_model
 from load_brainiac import load_brainiac
 
 
+def print_feature_statistics(loader, protein_dim, num_batches=1):
+    """
+    Print statistics about feature distributions to diagnose scaling issues
+    
+    Args:
+        loader: DataLoader with multimodal data
+        protein_dim: Dimension of protein features
+        num_batches: Number of batches to analyze
+    """
+    print("\n" + "="*80)
+    print("FEATURE DISTRIBUTION DIAGNOSTICS")
+    print("="*80)
+    
+    protein_stats = {'min': float('inf'), 'max': float('-inf'), 'mean': 0, 'std': 0, 'count': 0}
+    mri_stats = {'min': float('inf'), 'max': float('-inf'), 'mean': 0, 'std': 0, 'count': 0}
+    
+    protein_values = []
+    mri_values = []
+    
+    for batch_idx, batch in enumerate(loader):
+        if batch_idx >= num_batches:
+            break
+        
+        fused = batch['fused_features']  # [B, protein_dim + 768]
+        protein_feat = fused[:, :protein_dim]
+        mri_feat = fused[:, protein_dim:]
+        
+        protein_values.append(protein_feat.cpu().numpy().flatten())
+        mri_values.append(mri_feat.cpu().numpy().flatten())
+    
+    protein_all = np.concatenate(protein_values)
+    mri_all = np.concatenate(mri_values)
+    
+    print(f"\n📊 PROTEIN FEATURES ({protein_dim}-dim):")
+    print(f"   Range: [{protein_all.min():.4f}, {protein_all.max():.4f}]")
+    print(f"   Mean:  {protein_all.mean():.4f}")
+    print(f"   Std:   {protein_all.std():.4f}")
+    print(f"   Median: {np.median(protein_all):.4f}")
+    
+    print(f"\n📊 MRI FEATURES (768-dim):")
+    print(f"   Range: [{mri_all.min():.4f}, {mri_all.max():.4f}]")
+    print(f"   Mean:  {mri_all.mean():.4f}")
+    print(f"   Std:   {mri_all.std():.4f}")
+    print(f"   Median: {np.median(mri_all):.4f}")
+    
+    print(f"\n⚠️  IMBALANCE ANALYSIS:")
+    print(f"   Dimension ratio (MRI/Protein): {768 / protein_dim:.1f}x")
+    print(f"   Std ratio (MRI/Protein): {mri_all.std() / protein_all.std():.2f}x")
+    print(f"   Mean ratio (|MRI|/|Protein|): {abs(mri_all.mean()) / abs(protein_all.mean()) if protein_all.mean() != 0 else 'inf':.2f}x")
+    
+    print(f"\n✅ INTERPRETATION:")
+    if protein_all.std() > 0 and mri_all.std() > 0:
+        std_ratio = mri_all.std() / protein_all.std()
+        if std_ratio > 2:
+            print(f"   ⚠️  MRI has {std_ratio:.1f}x higher variance - may dominate gradients")
+        else:
+            print(f"   ✓ Variances are well-balanced")
+    
+    print("="*80 + "\n")
+
+
 def create_cv_splits(csv_path, n_splits=5, split_ratio=(0.6, 0.2, 0.2), random_state=42):
     """
     Create stratified K-fold cross-validation splits with specified ratio
@@ -287,7 +348,7 @@ def main():
         # Model config
         'protein_model_type': 'nn',  # 'nn' (Neural Network) or 'transformer'
         'protein_layer': 'last_hidden_layer',  # 'last_hidden_layer' for NN, 'transformer_embeddings' for Transformer
-        'fusion_model_type': 'weighted_attention',  # 'simple' or 'weighted_attention'
+        'fusion_model_type': 'simple',  # 'simple' or 'weighted_attention'
         'hidden_dim': 128, #params for the fusion model
         'fusion_dim': 128, #params for weighted fusion model (shared embedding dimension)
         'dropout': 0.3, #params for the fusion model
@@ -436,6 +497,10 @@ def main():
             torch.cuda.manual_seed(config['model_seed'])
         
         protein_dim = full_dataset.protein_dim
+        
+        # Print feature statistics only on fold 0 to avoid spam
+        if fold_idx == 0:
+            print_feature_statistics(train_loader, protein_dim, num_batches=3)
         
         # Create fusion model based on type
         if config['fusion_model_type'] == 'simple':
