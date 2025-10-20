@@ -22,7 +22,6 @@ from sklearn.metrics import (
     precision_recall_fscore_support,
     balanced_accuracy_score
 )
-from pathlib import Path
 
 # Feature alignment helper
 import sys as _sys
@@ -33,20 +32,36 @@ if _protein_mod_path not in _sys.path:
 from feature_utils import align_features_to_scaler, load_scaler_feature_columns
 
 
-def load_cv_splits(cv_splits_path):
-    """Load CV splits from fusion experiment"""
-    # Handle relative paths that might be prefixed with project name
-    if isinstance(cv_splits_path, str) and cv_splits_path.startswith('multimodal-AD/'):
+def normalize_path(path_str):
+    """Centralized path normalization helper
+    
+    Handles relative paths that might be prefixed with project name.
+    Strips duplicate 'multimodal-AD/' prefix if already in project directory.
+    
+    Args:
+        path_str: Path string (can be relative or absolute)
+        
+    Returns:
+        Path: Normalized absolute path
+    """
+    if isinstance(path_str, str) and path_str.startswith('multimodal-AD/'):
         # If path starts with project name but we're already in project dir
         cwd = Path.cwd()
         if cwd.name == 'multimodal-AD' or str(cwd).endswith('/multimodal-AD'):
             # Strip the project prefix to avoid duplication
-            cv_splits_path = cv_splits_path.replace('multimodal-AD/', '', 1)
+            path_str = path_str.replace('multimodal-AD/', '', 1)
             print(f"  Removed duplicate project prefix from path")
     
     # Normalize to absolute path
-    cv_splits_path = Path(cv_splits_path).expanduser().resolve()
-    print(f"  Using CV splits path: {cv_splits_path}")
+    normalized_path = Path(path_str).expanduser().resolve()
+    print(f"  Using normalized path: {normalized_path}")
+    return normalized_path
+
+
+def load_cv_splits(cv_splits_path):
+    """Load CV splits from fusion experiment"""
+    # Normalize path using centralized utility
+    cv_splits_path = normalize_path(cv_splits_path)
     
     try:
         with open(cv_splits_path, 'r') as f:
@@ -316,32 +331,11 @@ def main(args):
     print()
     
     # Load pre-trained model and scaler (once)
-    # Handle relative paths that might be prefixed with project name
-    model_path = args.model_path
-    if isinstance(model_path, str) and model_path.startswith('multimodal-AD/'):
-        # If path starts with project name but we're already in project dir
-        cwd = Path.cwd()
-        if cwd.name == 'multimodal-AD' or str(cwd).endswith('/multimodal-AD'):
-            # Strip the project prefix to avoid duplication
-            model_path = model_path.replace('multimodal-AD/', '', 1)
-            print(f"  Removed duplicate project prefix from model path")
-    
-    model_path = Path(model_path).expanduser().resolve()
-    print(f"  Using model path: {model_path}")
+    # Normalize paths using centralized utility
+    model_path = normalize_path(args.model_path)
     model = load_protein_model(model_path, model_type=args.model_type)
     
-    # Handle relative paths for scaler
-    scaler_path = args.scaler_path
-    if isinstance(scaler_path, str) and scaler_path.startswith('multimodal-AD/'):
-        # If path starts with project name but we're already in project dir
-        cwd = Path.cwd()
-        if cwd.name == 'multimodal-AD' or str(cwd).endswith('/multimodal-AD'):
-            # Strip the project prefix to avoid duplication
-            scaler_path = scaler_path.replace('multimodal-AD/', '', 1)
-            print(f"  Removed duplicate project prefix from scaler path")
-    
-    scaler_path = Path(scaler_path).expanduser().resolve()
-    print(f"  Using scaler path: {scaler_path}")
+    scaler_path = normalize_path(args.scaler_path)
     scaler = load_scaler(scaler_path)
     print()
     
