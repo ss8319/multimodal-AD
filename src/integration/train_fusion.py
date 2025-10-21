@@ -22,7 +22,7 @@ from datetime import datetime
 sys.path.append(str(Path(__file__).parent.parent / "mri" / "BrainIAC" / "src"))
 
 from multimodal_dataset import MultimodalDataset
-from fusion_model import get_model, get_weighted_fusion_model
+from fusion_model import get_model, get_weighted_fusion_model, get_asymmetric_fusion_model, get_simple_cross_modal_attention_model
 from load_brainiac import load_brainiac
 
 
@@ -382,7 +382,7 @@ def main():
         # Model config
         'protein_model_type': 'nn',  # 'nn' (Neural Network) or 'transformer'
         'protein_layer': 'last_hidden_layer',  # 'last_hidden_layer' for NN, 'transformer_embeddings' for Transformer
-        'fusion_model_type': 'simple',  # 'simple' or 'weighted_attention'
+        'fusion_model_type': 'cross_modal_attention',  # 'simple', 'weighted_attention', 'asymmetric', 'cross_modal_attention'
         'hidden_dim': 128, #params for the fusion model
         'fusion_dim': 128, #params for weighted fusion model (shared embedding dimension)
         'dropout': 0.3, #params for the fusion model
@@ -400,7 +400,7 @@ def main():
         'device': 'cuda' if torch.cuda.is_available() else 'cpu',
         
         # Model selection metric
-        'best_metric': 'val_f1',  # Options: 'composite', 'val_auc', 'val_balanced_acc', 'val_f1', 'val_acc'
+        'best_metric': 'composite',  # Options: 'composite', 'val_auc', 'val_balanced_acc', 'val_f1', 'val_acc'
     }
     
     # Create meaningful save directory name with model info
@@ -554,8 +554,26 @@ def main():
                 hidden_dim=config['hidden_dim'],
                 dropout=config['dropout']
             ).to(device)
+        elif config['fusion_model_type'] == 'asymmetric':
+            model = get_asymmetric_fusion_model(
+                protein_dim=protein_dim,
+                mri_dim=768,
+                protein_proj_dim=96,  # Modest expansion for protein
+                mri_proj_dim=160,     # More capacity for MRI
+                hidden_dim=config['hidden_dim'],
+                dropout=config['dropout']
+            ).to(device)
+        elif config['fusion_model_type'] == 'cross_modal_attention':
+            model = get_simple_cross_modal_attention_model(
+                protein_dim=protein_dim,
+                mri_dim=768,
+                shared_dim=64,  # Smaller dimension for simpler model
+                hidden_dim=config['hidden_dim'],
+                dropout=config['dropout'],
+                residual_alpha=0.7  # Strong residual to prevent attention overfitting
+            ).to(device)
         else:
-            raise ValueError(f"Unknown fusion_model_type: {config['fusion_model_type']}. Must be 'simple' or 'weighted_attention'")
+            raise ValueError(f"Unknown fusion_model_type: {config['fusion_model_type']}. Must be 'simple', 'weighted_attention', 'asymmetric', or 'cross_modal_attention'")
         
         # Setup training with class weights to handle imbalance
         # Calculate class weights from training data
@@ -567,9 +585,17 @@ def main():
         print(f"Class distribution in training: CN={class_counts[0]}, AD={class_counts[1]}")
         print(f"Class weights: CN={class_weights[0]:.3f}, AD={class_weights[1]:.3f}")
         
-        criterion = nn.CrossEntropyLoss(weight=class_weights)
+        criterion = nn.CrossEntropyLoss()
         optimizer = optim.Adam(model.parameters(), lr=config['learning_rate'])
         
+        # Learning rate scheduler - reduce LR when validation metric plateaus
+        scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, 
+            mode='max',           # Maximize the validation metric
+            factor=0.5,          # Reduce LR by half
+            patience=5,          # Wait 5 epochs before reducing
+            min_lr=1e-6         # Don't reduce below this
+        )
         # Track best model for this fold
         # Use balanced accuracy for model selection (better for imbalanced data)
         best_val_score = 0
@@ -695,6 +721,9 @@ def main():
             current_score, metric_desc = compute_best_score(
                 val_balanced_acc, val_auc, val_f1, val_acc, config['best_metric']
             )
+            
+            # Step the learning rate scheduler based on validation performance
+            scheduler.step(current_score)
             
             # Save best model based on selected metric
             if current_score > best_val_score:
