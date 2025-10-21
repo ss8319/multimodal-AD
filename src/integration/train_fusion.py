@@ -5,6 +5,7 @@ Simple implementation with train/test evaluation
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import DataLoader, Subset
 import numpy as np
@@ -24,6 +25,42 @@ sys.path.append(str(Path(__file__).parent.parent / "mri" / "BrainIAC" / "src"))
 from multimodal_dataset import MultimodalDataset
 from fusion_model import get_model, get_weighted_fusion_model, get_asymmetric_fusion_model, get_simple_cross_modal_attention_model
 from load_brainiac import load_brainiac
+
+
+class FocalLoss(nn.Module):
+    """
+    Focal Loss implementation for handling class imbalance.
+    
+    Focal Loss = -alpha * (1-pt)^gamma * log(pt)
+    where pt is the predicted probability for the true class.
+    
+    Args:
+        alpha: Weighting factor for rare class (default: 1.0)
+        gamma: Focusing parameter (default: 2.0)
+        reduction: Specifies the reduction to apply to the output
+    """
+    def __init__(self, alpha=1.0, gamma=2.0, reduction='mean'):
+        super(FocalLoss, self).__init__()
+        self.alpha = alpha
+        self.gamma = gamma
+        self.reduction = reduction
+    
+    def forward(self, inputs, targets):
+        # Compute cross entropy
+        ce_loss = F.cross_entropy(inputs, targets, reduction='none')
+        
+        # Compute pt (predicted probability for true class)
+        pt = torch.exp(-ce_loss)
+        
+        # Compute focal loss
+        focal_loss = self.alpha * (1 - pt) ** self.gamma * ce_loss
+        
+        if self.reduction == 'mean':
+            return focal_loss.mean()
+        elif self.reduction == 'sum':
+            return focal_loss.sum()
+        else:
+            return focal_loss
 
 
 def print_feature_statistics(loader, protein_dim, num_batches=1):
@@ -382,7 +419,7 @@ def main():
         # Model config
         'protein_model_type': 'nn',  # 'nn' (Neural Network) or 'transformer'
         'protein_layer': 'last_hidden_layer',  # 'last_hidden_layer' for NN, 'transformer_embeddings' for Transformer
-        'fusion_model_type': 'cross_modal_attention',  # 'simple', 'weighted_attention', 'asymmetric', 'cross_modal_attention'
+        'fusion_model_type': 'weighted_attention',  # 'simple', 'weighted_attention', 'asymmetric', 'cross_modal_attention'
         'hidden_dim': 128, #params for the fusion model
         'fusion_dim': 128, #params for weighted fusion model (shared embedding dimension)
         'dropout': 0.3, #params for the fusion model
@@ -398,6 +435,11 @@ def main():
         'learning_rate': 0.001,
         'model_seed': 42,
         'device': 'cuda' if torch.cuda.is_available() else 'cpu',
+        
+        # Loss function config
+        'loss_function': 'focal',  # Options: 'cross_entropy', 'focal'
+        'focal_alpha': 2.0,        # Weight for minority class (AD)
+        'focal_gamma': 2.0,        # Focusing parameter
         
         # Model selection metric
         'best_metric': 'composite',  # Options: 'composite', 'val_auc', 'val_balanced_acc', 'val_f1', 'val_acc'
@@ -575,17 +617,27 @@ def main():
         else:
             raise ValueError(f"Unknown fusion_model_type: {config['fusion_model_type']}. Must be 'simple', 'weighted_attention', 'asymmetric', or 'cross_modal_attention'")
         
-        # Setup training with class weights to handle imbalance
-        # Calculate class weights from training data
+        # Setup training with Focal Loss to handle class imbalance
+        # Calculate class distribution for reporting
         df_full = pd.read_csv(config['data_csv'])
         train_labels = (df_full.iloc[train_idx]['research_group'] == 'AD').astype(int).values
         class_counts = np.bincount(train_labels)
-        class_weights = torch.FloatTensor(len(train_labels) / (len(class_counts) * class_counts)).to(device)
         
         print(f"Class distribution in training: CN={class_counts[0]}, AD={class_counts[1]}")
-        print(f"Class weights: CN={class_weights[0]:.3f}, AD={class_weights[1]:.3f}")
         
-        criterion = nn.CrossEntropyLoss()
+        # Select loss function based on config
+        if config['loss_function'] == 'focal':
+            # Use Focal Loss for handling class imbalance
+            criterion = FocalLoss(
+                alpha=config['focal_alpha'], 
+                gamma=config['focal_gamma'], 
+                reduction='mean'
+            )
+            print(f"Using Focal Loss: alpha={config['focal_alpha']}, gamma={config['focal_gamma']}")
+        else:
+            # Use standard Cross Entropy Loss
+            criterion = nn.CrossEntropyLoss()
+            print("Using Cross Entropy Loss")
         optimizer = optim.Adam(model.parameters(), lr=config['learning_rate'])
         
         # Learning rate scheduler - reduce LR when validation metric plateaus
