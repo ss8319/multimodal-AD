@@ -407,7 +407,7 @@ def compute_best_score(val_balanced_acc, val_auc, val_f1, val_acc, best_metric):
         raise ValueError(f"Unknown best_metric: {best_metric}. Use 'composite', 'val_auc', 'val_balanced_acc', 'val_f1', or 'val_acc'")
 
 
-def main():
+def main(config_overrides=None):
     # Configuration
     config = {
         # Data paths
@@ -445,8 +445,14 @@ def main():
         'best_metric': 'composite',  # Options: 'composite', 'val_auc', 'val_balanced_acc', 'val_f1', 'val_acc'
     }
     
-    # Create meaningful save directory name with model info
-    config['save_dir'] = f'/home/ssim0068/multimodal-AD/runs/fusion_{config["fusion_model_type"]}_{config["protein_model_type"]}_{config["n_folds"]}fold_cv'
+    # Apply config overrides if provided
+    if config_overrides:
+        config.update(config_overrides)
+        print(f"Applied config overrides: {config_overrides}")
+    
+    # Create meaningful save directory name with model info (only if not provided in overrides)
+    if 'save_dir' not in config:
+        config['save_dir'] = f'/home/ssim0068/multimodal-AD/runs/fusion_{config["fusion_model_type"]}_{config["protein_model_type"]}_{config["n_folds"]}fold_cv'
     
     print("="*60)
     print("MULTIMODAL FUSION TRAINING - CROSS-VALIDATION")

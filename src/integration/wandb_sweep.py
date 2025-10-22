@@ -1,0 +1,189 @@
+"""
+W&B Hyperparameter Sweep Configuration
+Much simpler than Optuna - just define the sweep config and W&B handles the optimization
+"""
+
+import wandb
+import json
+from pathlib import Path
+from datetime import datetime
+
+# Import the main training function
+from train_fusion import main
+
+
+def create_sweep_config():
+    """
+    Create W&B sweep configuration
+    """
+    sweep_config = {
+        'method': 'bayes',  # Bayesian optimization (best choice)
+        'metric': {
+            'name': 'test/f1',
+            'goal': 'maximize'
+        },
+        'parameters': {
+            'focal_alpha': {
+                'distribution': 'uniform',
+                'min': 1.0,
+                'max': 3.5
+            },
+            'focal_gamma': {
+                'distribution': 'uniform', 
+                'min': 0.0,
+                'max': 3.5
+            },
+            'learning_rate': {
+                'values': [0.0005, 0.001, 0.0015]
+            }
+        },
+        'early_terminate': {
+            'type': 'hyperband',
+            'min_iter': 3,
+            'eta': 2
+        }
+    }
+    
+    return sweep_config
+
+
+def create_quick_sweep_config():
+    """
+    Create quick W&B sweep configuration for testing
+    """
+    sweep_config = {
+        'method': 'random',  # Random search for quick testing
+        'metric': {
+            'name': 'test/f1',
+            'goal': 'maximize'
+        },
+        'parameters': {
+            'focal_alpha': {
+                'values': [1.0, 2.0, 3.0]
+            },
+            'focal_gamma': {
+                'values': [0.0, 1.5, 3.0]
+            },
+            'learning_rate': {
+                'values': [0.001]
+            }
+        }
+    }
+    
+    return sweep_config
+
+
+def train_with_sweep():
+    """
+    Training function that W&B will call for each trial
+    """
+    # Initialize W&B run (this will be called by W&B sweep)
+    run = wandb.init()
+    
+    # Get hyperparameters from W&B
+    config = wandb.config
+    
+    # Create config overrides
+    config_overrides = {
+        'focal_alpha': config.focal_alpha,
+        'focal_gamma': config.focal_gamma,
+        'learning_rate': config.learning_rate,
+        'save_dir': f'/home/ssim0068/multimodal-AD/runs/wandb_sweep_{run.id}',
+        'num_epochs': 15,
+        'n_folds': 5,
+        'use_wandb': True,  # Enable W&B logging
+        'wandb_project': 'multimodal-ad',
+        'wandb_group': f'sweep_{run.sweep_id}',
+        'wandb_entity': run.entity
+    }
+    
+    try:
+        # Run training
+        main(config_overrides)
+        
+        # Load results and log final metrics
+        results_dir = Path(config_overrides['save_dir'])
+        results_file = results_dir / 'aggregated_results.json'
+        
+        if results_file.exists():
+            with open(results_file, 'r') as f:
+                result_data = json.load(f)
+            
+            # Log final metrics to W&B
+            metrics = result_data['aggregated_metrics']
+            wandb.log({
+                'test/f1': metrics.get('test_f1', {}).get('mean', 0.0),
+                'test/accuracy': metrics.get('test_acc', {}).get('mean', 0.0),
+                'test/balanced_accuracy': metrics.get('test_balanced_acc', {}).get('mean', 0.0),
+                'test/auc': metrics.get('test_auc', {}).get('mean', 0.0),
+                'test/precision': metrics.get('test_precision', {}).get('mean', 0.0),
+                'test/recall': metrics.get('test_recall', {}).get('mean', 0.0),
+            })
+            
+            print(f"Trial completed successfully: F1={metrics.get('test_f1', {}).get('mean', 0.0):.4f}")
+        else:
+            print("No results file found")
+            if wandb.run is not None:
+                wandb.log({'test/f1': 0.0})
+            
+    except Exception as e:
+        print(f"Trial failed: {e}")
+        if wandb.run is not None:
+            wandb.log({'test/f1': 0.0})
+    
+    finally:
+        wandb.finish()
+
+
+def create_and_run_sweep(n_trials=30, quick=False):
+    """
+    Create and run W&B sweep
+    """
+    print("="*80)
+    print("W&B HYPERPARAMETER SWEEP")
+    print("="*80)
+    
+    # Create sweep config
+    if quick:
+        sweep_config = create_quick_sweep_config()
+        print("Using quick sweep configuration")
+    else:
+        sweep_config = create_sweep_config()
+        print("Using full sweep configuration")
+    
+    print(f"Number of trials: {n_trials}")
+    print(f"Optimization method: {sweep_config['method']}")
+    print(f"Target metric: {sweep_config['metric']['name']}")
+    print()
+    
+    # Create sweep
+    sweep_id = wandb.sweep(
+        sweep=sweep_config,
+        project='multimodal-ad',
+        entity='shamussim'
+    )
+    
+    print(f"Sweep created with ID: {sweep_id}")
+    print(f"Sweep URL: https://wandb.ai/shamussim/multimodal-ad/sweeps/{sweep_id}")
+    print()
+    
+    # Run sweep
+    print("Starting sweep...")
+    wandb.agent(
+        sweep_id=sweep_id,
+        function=train_with_sweep,
+        count=n_trials,
+        project='multimodal-ad',
+        entity='shamussim'
+    )
+    
+    print("Sweep completed!")
+
+
+if __name__ == "__main__":
+    import sys
+    
+    if len(sys.argv) > 1 and sys.argv[1] == 'quick':
+        create_and_run_sweep(n_trials=5, quick=True)
+    else:
+        create_and_run_sweep(n_trials=30, quick=False)
