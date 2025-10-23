@@ -182,13 +182,49 @@ class ProteinLatentExtractor:
                     df = pd.DataFrame([protein_values], columns=self.scaler_feature_columns[:len(protein_values)])
                 except Exception:
                     df = None
+            
             if df is not None:
+                # Step 1: Align features to match training data order/columns
                 aligned = align_features_to_scaler(df, self.scaler, self.scaler_feature_columns)
+                
+                # Step 2: Validate that alignment worked correctly
+                # Check 1: Did we get the right number of features?
+                expected_n_features = len(self.scaler_feature_columns)
+                actual_n_features = aligned.shape[1]
+                if actual_n_features != expected_n_features:
+                    raise ValueError(
+                        f"Feature alignment failed: expected {expected_n_features} features, "
+                        f"got {actual_n_features}. Scaler columns: {self.scaler_feature_columns[:5]}..."
+                    )
+                
+                # Check 2: Are the columns in the correct order?
+                # This prevents subtle bugs where features get reordered
+                if not all(aligned.columns == self.scaler_feature_columns):
+                    raise ValueError(
+                        f"Feature alignment failed: column order mismatch. "
+                        f"Expected: {self.scaler_feature_columns[:5]}..., "
+                        f"Got: {list(aligned.columns)[:5]}..."
+                    )
+                
+                # Step 3: Apply scaling (now safe to do)
                 scaled_values = self.scaler.transform(aligned)
                 return scaled_values.flatten()
         
-        # Final fallback: Reshape and transform without alignment
+        # Final fallback: Direct scaling without alignment
+        # This happens when we don't have feature column names or alignment fails
         protein_values_2d = protein_values.reshape(1, -1)
+        
+        # Safety check: Make sure dimensions match what the scaler expects
+        # The scaler was trained on n_features_in_ features, so we need exactly that many
+        expected_n_features = self.scaler.n_features_in_
+        actual_n_features = protein_values_2d.shape[1]
+        if actual_n_features != expected_n_features:
+            raise ValueError(
+                f"Feature dimension mismatch: scaler expects {expected_n_features} features, "
+                f"got {actual_n_features}. Cannot proceed without feature alignment."
+            )
+        
+        # Apply scaling directly (assumes features are already in correct order)
         scaled_values = self.scaler.transform(protein_values_2d)
         return scaled_values.flatten()
     
