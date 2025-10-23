@@ -135,6 +135,91 @@ class MultimodalDataset(Dataset):
         self.fused_dim = self.protein_dim + self.mri_dim
         
         print(f"  Feature dimensions: protein={self.protein_dim} (raw={self.raw_protein_dim}), mri={self.mri_dim}, fused={self.fused_dim}")
+        
+        # Validate dataset integrity
+        self._validate_dataset()
+        
+        # Initialize error tracking
+        self.error_stats = {
+            'mri_file_not_found': 0,
+            'mri_data_validation_failed': 0,
+            'mri_processing_failed': 0,
+            'sample_load_failed': 0,
+            'total_samples_processed': 0
+        }
+    
+    def _validate_dataset(self):
+        """Validate dataset integrity and report issues"""
+        print(f"\nValidating dataset integrity...")
+        
+        # Check class distribution
+        if 'research_group' in self.df.columns:
+            class_counts = self.df['research_group'].value_counts()
+            print(f"  Class distribution: {dict(class_counts)}")
+            
+            if len(class_counts) < 2:
+                print(f"  WARNING: Dataset has only {len(class_counts)} class(es)")
+            
+            # Check for unknown classes
+            valid_classes = {'AD', 'CN'}
+            unknown_classes = set(class_counts.index) - valid_classes
+            if unknown_classes:
+                print(f"  WARNING: Unknown classes found: {unknown_classes}")
+        
+        # Check for missing MRI paths
+        if 'mri_path' in self.df.columns:
+            missing_mri = self.df['mri_path'].isna().sum()
+            if missing_mri > 0:
+                print(f"  WARNING: {missing_mri} samples missing MRI paths")
+            
+            # Check for empty MRI paths
+            empty_mri = (self.df['mri_path'] == '').sum()
+            if empty_mri > 0:
+                print(f"  WARNING: {empty_mri} samples have empty MRI paths")
+        
+        # Check for missing Subject IDs
+        if 'Subject' in self.df.columns:
+            missing_subjects = self.df['Subject'].isna().sum()
+            if missing_subjects > 0:
+                print(f"  WARNING: {missing_subjects} samples missing Subject IDs")
+        
+        # Check protein columns
+        if len(self.protein_columns) == 0:
+            print(f"  ERROR: No protein columns detected")
+        else:
+            # Check for all-NaN protein columns
+            protein_df = self.df[self.protein_columns]
+            all_nan_cols = protein_df.columns[protein_df.isna().all()].tolist()
+            if all_nan_cols:
+                print(f"  WARNING: {len(all_nan_cols)} protein columns are all NaN")
+            
+            # Check for constant protein columns (zero variance)
+            constant_cols = []
+            for col in self.protein_columns:
+                if protein_df[col].nunique() <= 1:
+                    constant_cols.append(col)
+            if constant_cols:
+                print(f"  WARNING: {len(constant_cols)} protein columns have constant values")
+        
+        print(f"  Dataset validation completed")
+    
+    def print_error_stats(self):
+        """Print error statistics for debugging"""
+        print(f"\nDataset Error Statistics:")
+        print(f"  Total samples processed: {self.error_stats['total_samples_processed']}")
+        print(f"  MRI file not found: {self.error_stats['mri_file_not_found']}")
+        print(f"  MRI data validation failed: {self.error_stats['mri_data_validation_failed']}")
+        print(f"  MRI processing failed: {self.error_stats['mri_processing_failed']}")
+        print(f"  Sample load failed: {self.error_stats['sample_load_failed']}")
+        
+        total_errors = (self.error_stats['mri_file_not_found'] + 
+                       self.error_stats['mri_data_validation_failed'] + 
+                       self.error_stats['mri_processing_failed'] + 
+                       self.error_stats['sample_load_failed'])
+        
+        if self.error_stats['total_samples_processed'] > 0:
+            error_rate = total_errors / self.error_stats['total_samples_processed'] * 100
+            print(f"  Total error rate: {error_rate:.2f}%")
     
     def __len__(self):
         return len(self.df)
@@ -165,40 +250,91 @@ class MultimodalDataset(Dataset):
     
     def _extract_mri_latents(self, mri_path):
         """
-        Extract MRI latents using BrainIAC model
+        Extract MRI latents using BrainIAC model with comprehensive error handling
         This is done on-the-fly during training
         """
-        import nibabel as nib
-        from monai.transforms import (
-            Compose, LoadImaged, EnsureChannelFirstd, 
-            Resized, NormalizeIntensityd, EnsureTyped
-        )
-        
-        # Load and preprocess MRI image
-        # Using MONAI transforms similar to BrainIAC dataset
-        transform = Compose([
-            LoadImaged(keys=["image"]),
-            EnsureChannelFirstd(keys=["image"]),
-            Resized(keys=["image"], spatial_size=(96, 96, 96), mode="trilinear"),
-            NormalizeIntensityd(keys=["image"], nonzero=True, channel_wise=True),
-            EnsureTyped(keys=["image"])
-        ])
-        
-        # Load image
-        sample = {"image": str(mri_path)}
-        sample = transform(sample)
-        image = sample["image"].unsqueeze(0).to(self.device)  # [1, 1, 96, 96, 96]
-        
-        # Extract features
-        with torch.no_grad():
-            features = self.mri_model(image)  # [1, 768]
-            features = features.cpu().numpy().flatten()  # [768]
-        
-        return features
+        try:
+            import nibabel as nib
+            from monai.transforms import (
+                Compose, LoadImaged, EnsureChannelFirstd, 
+                Resized, NormalizeIntensityd, EnsureTyped
+            )
+            
+            # Validate file exists and is readable
+            mri_path = Path(mri_path)
+            if not mri_path.exists():
+                raise FileNotFoundError(f"MRI file not found: {mri_path}")
+            
+            if not mri_path.is_file():
+                raise ValueError(f"MRI path is not a file: {mri_path}")
+            
+            # Check file size (basic corruption check)
+            file_size = mri_path.stat().st_size
+            if file_size < 1024:  # Less than 1KB is suspicious
+                raise ValueError(f"MRI file too small ({file_size} bytes): {mri_path}")
+            
+            # Load and preprocess MRI image
+            # Using MONAI transforms similar to BrainIAC dataset
+            transform = Compose([
+                LoadImaged(keys=["image"]),
+                EnsureChannelFirstd(keys=["image"]),
+                Resized(keys=["image"], spatial_size=(96, 96, 96), mode="trilinear"),
+                NormalizeIntensityd(keys=["image"], nonzero=True, channel_wise=True),
+                EnsureTyped(keys=["image"])
+            ])
+            
+            # Load image
+            sample = {"image": str(mri_path)}
+            sample = transform(sample)
+            image = sample["image"].unsqueeze(0).to(self.device)  # [1, 1, 96, 96, 96]
+            
+            # Validate image dimensions
+            if image.shape != (1, 1, 96, 96, 96):
+                raise ValueError(f"Unexpected image shape {image.shape}, expected (1, 1, 96, 96, 96)")
+            
+            # Check for NaN or infinite values
+            if torch.isnan(image).any():
+                raise ValueError(f"NaN values detected in MRI image: {mri_path}")
+            
+            if torch.isinf(image).any():
+                raise ValueError(f"Infinite values detected in MRI image: {mri_path}")
+            
+            # Extract features
+            with torch.no_grad():
+                features = self.mri_model(image)  # [1, 768]
+                features = features.cpu().numpy().flatten()  # [768]
+            
+            # Validate output features
+            if len(features) != 768:
+                raise ValueError(f"Unexpected feature dimension {len(features)}, expected 768")
+            
+            if np.isnan(features).any():
+                raise ValueError(f"NaN values in extracted MRI features: {mri_path}")
+            
+            if np.isinf(features).any():
+                raise ValueError(f"Infinite values in extracted MRI features: {mri_path}")
+            
+            return features
+            
+        except FileNotFoundError as e:
+            self.error_stats['mri_file_not_found'] += 1
+            print(f"ERROR: MRI file not found: {e}")
+            return np.zeros(768, dtype=np.float32)
+            
+        except ValueError as e:
+            self.error_stats['mri_data_validation_failed'] += 1
+            print(f"ERROR: MRI data validation failed: {e}")
+            return np.zeros(768, dtype=np.float32)
+            
+        except Exception as e:
+            self.error_stats['mri_processing_failed'] += 1
+            print(f"ERROR: MRI processing failed for {mri_path}: {e}")
+            print(f"  Error type: {type(e).__name__}")
+            return np.zeros(768, dtype=np.float32)
     
     def __getitem__(self, idx):
         """
-        Get a single sample
+        Get a single sample with comprehensive validation
         
         Returns:
             dict with keys:
@@ -208,28 +344,62 @@ class MultimodalDataset(Dataset):
                 - 'label': 0 (CN) or 1 (AD)
                 - 'subject_id': Subject identifier
         """
-        row = self.df.iloc[idx]
-        
-        # Extract protein features
-        protein_feat = self._extract_protein_features(idx)  # [protein_dim]
-        
-        # Extract MRI latents on-the-fly
-        mri_path = row['mri_path']
-        mri_feat = self._extract_mri_latents(mri_path)  # [768]
-        
-        # Concatenate features
-        fused_feat = np.concatenate([protein_feat, mri_feat])  # [protein_dim + 768]
-        
-        # Get label: AD=1, CN=0
-        label = 1 if row['research_group'] == 'AD' else 0
-        
-        return {
-            'protein_features': torch.FloatTensor(protein_feat),
-            'mri_features': torch.FloatTensor(mri_feat),
-            'fused_features': torch.FloatTensor(fused_feat),
-            'label': torch.LongTensor([label]).squeeze(),
-            'subject_id': row['Subject']
-        }
+        try:
+            self.error_stats['total_samples_processed'] += 1
+            row = self.df.iloc[idx]
+            
+            # Validate required columns exist
+            required_cols = ['mri_path', 'research_group', 'Subject']
+            missing_cols = [col for col in required_cols if col not in row.index]
+            if missing_cols:
+                raise KeyError(f"Missing required columns: {missing_cols}")
+            
+            # Validate mri_path is not NaN
+            mri_path = row['mri_path']
+            if pd.isna(mri_path):
+                raise ValueError(f"MRI path is NaN for sample {idx}")
+            
+            # Extract protein features
+            protein_feat = self._extract_protein_features(idx)  # [protein_dim]
+            
+            # Extract MRI latents on-the-fly
+            mri_feat = self._extract_mri_latents(mri_path)  # [768]
+            
+            # Concatenate features
+            fused_feat = np.concatenate([protein_feat, mri_feat])  # [protein_dim + 768]
+            
+            # Get label: AD=1, CN=0
+            research_group = row['research_group']
+            if pd.isna(research_group):
+                raise ValueError(f"Research group is NaN for sample {idx}")
+            
+            label = 1 if research_group == 'AD' else 0
+            
+            # Validate subject_id
+            subject_id = row['Subject']
+            if pd.isna(subject_id):
+                subject_id = f"unknown_{idx}"  # Fallback
+            
+            return {
+                'protein_features': torch.FloatTensor(protein_feat),
+                'mri_features': torch.FloatTensor(mri_feat),
+                'fused_features': torch.FloatTensor(fused_feat),
+                'label': torch.LongTensor([label]).squeeze(),
+                'subject_id': str(subject_id)
+            }
+            
+        except Exception as e:
+            self.error_stats['sample_load_failed'] += 1
+            print(f"ERROR: Failed to load sample {idx}: {e}")
+            print(f"  Error type: {type(e).__name__}")
+            # Return zero-filled sample as fallback
+            return {
+                'protein_features': torch.zeros(self.protein_dim, dtype=torch.float32),
+                'mri_features': torch.zeros(self.mri_dim, dtype=torch.float32),
+                'fused_features': torch.zeros(self.fused_dim, dtype=torch.float32),
+                'label': torch.LongTensor([0]),
+                'subject_id': f"error_{idx}"
+            }
 
 
 def get_dataloader(csv_path, brainiac_model, protein_run_dir=None, batch_size=4, shuffle=True, device='cpu'):
