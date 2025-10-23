@@ -351,7 +351,7 @@ def main(config_overrides=None, wandb_run=None):
         # Loss function config
         'loss_function': 'cross_entropy',  # Options: 'cross_entropy', 'focal'
         'focal_alpha': 2.0,        # Weight for minority class (AD)
-        'focal_gamma': 2.0,        # Focusing parameter
+        'focal_gamma': 2.0,        # Focusing parameter; when gamma is 0, the loss is equivalent to the cross entropy loss.
         
         # Model selection metric
         'best_metric': 'val_mcc',  # Options: 'composite', 'val_auc', 'val_balanced_acc', 'val_f1', 'val_acc', val_mcc'
@@ -369,7 +369,7 @@ def main(config_overrides=None, wandb_run=None):
     
     # Create meaningful save directory name with model info (only if not provided in overrides)
     if 'save_dir' not in config:
-        config['save_dir'] = f'/home/ssim0068/multimodal-AD/runs/fusion_{config["fusion_model_type"]}_{config["protein_model_type"]}_{config["n_folds"]}fold_cv'
+        config['save_dir'] = f'/home/ssim0068/multimodal-AD/runs/{config["fusion_model_type"]}_{config["protein_model_type"]}'
     
     print("="*60)
     print("MULTIMODAL FUSION TRAINING - CROSS-VALIDATION")
@@ -420,7 +420,7 @@ def main(config_overrides=None, wandb_run=None):
         }
         config.update(wandb_config)
 
-        run_name = f"fusion_{config['fusion_model_type']}_{config['protein_model_type']}_{config['n_folds']}fold_cv"
+        run_name = f"{config['fusion_model_type']}_{config['protein_model_type']}"
         base_wandb_run = wandb.init(
             project=config['wandb_project'],
             entity=config['wandb_entity'],
@@ -589,7 +589,7 @@ def main(config_overrides=None, wandb_run=None):
             min_lr=1e-6         # Don't reduce below this
         )
         # Track best model for this fold
-        best_val_score = 0
+        best_val_score = float('-inf')  # Initialize to negative infinity for MCC
         best_epoch = 0
         fold_history = {'train': [], 'val': [], 'test': []}
         
