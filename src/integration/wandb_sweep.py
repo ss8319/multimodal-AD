@@ -92,7 +92,7 @@ def train_with_sweep():
         'num_epochs': 15,
         'n_folds': 5,
         'use_wandb': True,  # Enable W&B logging
-        'wandb_project': 'multimodal-ad',
+        'wandb_project': run.project,  # Use the project from the sweep run
         'wandb_group': f'sweep_{run.sweep_id}',
         'wandb_entity': run.entity
     }
@@ -166,9 +166,19 @@ def create_and_run_sweep(n_trials=30, quick=False):
     """
     Create and run W&B sweep
     """
+    import os
+    
     print("="*80)
     print("W&B HYPERPARAMETER SWEEP")
     print("="*80)
+    
+    # Get project and entity from environment or use defaults
+    project = os.environ.get('WANDB_PROJECT', 'multimodal-ad')
+    entity = os.environ.get('WANDB_ENTITY', 'shamussim')
+    
+    print(f"W&B Project: {project}")
+    print(f"W&B Entity: {entity}")
+    print()
     
     # Create sweep config
     if quick:
@@ -186,12 +196,12 @@ def create_and_run_sweep(n_trials=30, quick=False):
     # Create sweep
     sweep_id = wandb.sweep(
         sweep=sweep_config,
-        project='multimodal-ad',
-        entity='shamussim'
+        project=project,
+        entity=entity
     )
     
     print(f"Sweep created with ID: {sweep_id}")
-    print(f"Sweep URL: https://wandb.ai/shamussim/multimodal-ad/sweeps/{sweep_id}")
+    print(f"Sweep URL: https://wandb.ai/{entity}/{project}/sweeps/{sweep_id}")
     print()
     
     # Run sweep
@@ -200,8 +210,8 @@ def create_and_run_sweep(n_trials=30, quick=False):
         sweep_id=sweep_id,
         function=train_with_sweep,
         count=n_trials,
-        project='multimodal-ad',
-        entity='shamussim'
+        project=project,
+        entity=entity
     )
     
     print("Sweep completed!")
@@ -211,6 +221,6 @@ if __name__ == "__main__":
     import sys
     
     if len(sys.argv) > 1 and sys.argv[1] == 'quick':
-        create_and_run_sweep(n_trials=5, quick=True)
+        create_and_run_sweep(n_trials=2, quick=True)
     else:
         create_and_run_sweep(n_trials=30, quick=False)
