@@ -37,7 +37,7 @@ class MetricsCalculator:
         cm = confusion_matrix(labels, predictions, labels=[0, 1])
         
         # Sensitivity and specificity
-        sensitivity = cm[1,1] / (cm[1,1] + cm[1,0]) if (cm[1,1] + cm[1,0]) > 0 else 0
+        sensitivity = cm[1,1] / (cm[1,1] + cm[1,0]) if (cm[1,1] + cm[1,0]) > 0 else 0 # same as recall
         specificity = cm[0,0] / (cm[0,0] + cm[0,1]) if (cm[0,0] + cm[0,1]) > 0 else 0
         
         # Precision, recall, F1
