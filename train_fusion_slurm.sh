@@ -42,7 +42,7 @@ echo "wandb available: $HAS_WANDB"
 echo "Setting up wandb logging..."
 # You can set your API key here or use wandb login in advance
 # export WANDB_API_KEY="your-api-key-here"
-export WANDB_PROJECT="multimodal-ad"
+export WANDB_PROJECT="AD-multimodal"
 # export WANDB_ENTITY="your-username"  # Remove placeholder; set this in environment if needed
 export WANDB_GROUP="cv_$(date +%Y%m%d_%H%M%S)"
 echo "wandb configuration: project=$WANDB_PROJECT, entity=${WANDB_ENTITY:-<unset>}, group=$WANDB_GROUP"
