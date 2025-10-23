@@ -36,7 +36,7 @@ echo "wandb available: $HAS_WANDB"
 
 # Set up wandb
 echo "Setting up wandb..."
-export WANDB_PROJECT="multimodal-ad"
+export WANDB_PROJECT="AD-multimodal"
 export WANDB_ENTITY="shamussim"  # Replace with your W&B username
 echo "wandb configuration: project=$WANDB_PROJECT, entity=$WANDB_ENTITY"
 
