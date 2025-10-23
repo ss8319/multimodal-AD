@@ -354,7 +354,7 @@ def main(config_overrides=None, wandb_run=None):
         'focal_gamma': 2.0,        # Focusing parameter
         
         # Model selection metric
-        'best_metric': 'composite',  # Options: 'composite', 'val_auc', 'val_balanced_acc', 'val_f1', 'val_acc'
+        'best_metric': 'val_mcc',  # Options: 'composite', 'val_auc', 'val_balanced_acc', 'val_f1', 'val_acc', val_mcc'
 
         # Weights & Biases defaults (env overrides supported)
         'wandb_project': os.environ.get('WANDB_PROJECT') or 'multimodal-ad',
@@ -691,6 +691,7 @@ def main(config_overrides=None, wandb_run=None):
             'test_f1': test_metrics['f1'],
             'test_sensitivity': test_metrics['sensitivity'],
             'test_specificity': test_metrics['specificity'],
+            'test_mcc': test_metrics['mcc'],
             'test_cm': test_metrics['confusion_matrix'].tolist(),
             'n_train': len(train_idx),
             'n_val': len(val_idx),
@@ -725,6 +726,7 @@ def main(config_overrides=None, wandb_run=None):
             'test/f1': test_metrics['f1'],
             'test/sensitivity': test_metrics['sensitivity'],
             'test/specificity': test_metrics['specificity'],
+            'test/mcc': test_metrics['mcc'],
         }, prefix=f"fold_{fold_idx}")
         
         # Log AUC if valid
@@ -752,7 +754,7 @@ def main(config_overrides=None, wandb_run=None):
         wandb_logger.log_table(wandb.Table(dataframe=predictions_df), "predictions", prefix=f"fold_{fold_idx}/test")
     
     # Aggregate results across folds using utility function
-    metrics_to_aggregate = ['test_acc', 'test_balanced_acc', 'test_auc', 'test_precision', 'test_recall', 'test_f1', 'test_sensitivity', 'test_specificity']
+    metrics_to_aggregate = ['test_acc', 'test_balanced_acc', 'test_auc', 'test_precision', 'test_recall', 'test_f1', 'test_sensitivity', 'test_specificity', 'test_mcc']
     aggregated = aggregate_cv_results(fold_results, metrics_to_aggregate)
     
     # Print aggregated results
@@ -821,7 +823,8 @@ def main(config_overrides=None, wandb_run=None):
                     'Precision': f"{fold['test_precision']:.4f}",
                     'Recall': f"{fold['test_recall']:.4f}",
                     'Sensitivity': f"{fold['test_sensitivity']:.4f}",
-                    'Specificity': f"{fold['test_specificity']:.4f}"
+                    'Specificity': f"{fold['test_specificity']:.4f}",
+                    'MCC': f"{fold['test_mcc']:.4f}"
                 })
             
             summary_logger.log_table(wandb.Table(dataframe=pd.DataFrame(fold_summary)), "fold_results", prefix="summary")

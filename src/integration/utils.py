@@ -7,7 +7,8 @@ import torch
 import wandb
 from sklearn.metrics import (
     accuracy_score, balanced_accuracy_score, precision_score, 
-    recall_score, f1_score, roc_auc_score, confusion_matrix
+    recall_score, f1_score, roc_auc_score, confusion_matrix,
+    matthews_corrcoef
 )
 
 
@@ -45,6 +46,12 @@ class MetricsCalculator:
         recall = recall_score(labels, predictions, average='binary', zero_division=0)
         f1 = f1_score(labels, predictions, average='binary', zero_division=0)
         
+        # Matthews Correlation Coefficient (MCC)
+        # MCC is a balanced measure that considers all four confusion matrix categories
+        # Range: -1 (total disagreement) to +1 (perfect agreement)
+        # Reference: https://scikit-learn.org/stable/modules/generated/sklearn.metrics.matthews_corrcoef.html
+        mcc = matthews_corrcoef(labels, predictions)
+        
         # AUC calculation with safety checks
         auc = MetricsCalculator._safe_auc_score(labels, probabilities) if probabilities is not None else None
         
@@ -56,6 +63,7 @@ class MetricsCalculator:
             'f1': f1,
             'sensitivity': sensitivity,
             'specificity': specificity,
+            'mcc': mcc,
             'auc': auc,
             'confusion_matrix': cm
         }
@@ -278,16 +286,18 @@ def print_results(split_name, loss, metrics_dict):
     print(f"  Precision: {metrics_dict['precision']:.4f}")
     print(f"  Recall: {metrics_dict['recall']:.4f}")
     print(f"  F1: {metrics_dict['f1']:.4f}")
+    print(f"  MCC: {metrics_dict['mcc']:.4f}")
 
 
 def compute_best_score(val_metrics, best_metric):
     """
     Compute the score based on the best_metric configuration.
+    Calculation of this val metric helps us determine the best checkpoint.
     
     Args:
         val_metrics: Dict of validation metrics from MetricsCalculator
         best_metric: Configuration for the best metric to optimize.
-                     Can be 'composite', 'val_auc', 'val_balanced_acc', 'val_f1', 'val_acc'
+                     Can be 'composite', 'val_auc', 'val_balanced_acc', 'val_f1', 'val_acc', 'val_mcc'
     
     Returns:
         tuple: (score, metric_name)
@@ -306,5 +316,7 @@ def compute_best_score(val_metrics, best_metric):
         return val_metrics['f1'], "F1"
     elif best_metric == 'val_acc':
         return val_metrics['accuracy'], "Accuracy"
+    elif best_metric == 'val_mcc':
+        return val_metrics['mcc'], "MCC"
     else:
-        raise ValueError(f"Unknown best_metric: {best_metric}. Use 'composite', 'val_auc', 'val_balanced_acc', 'val_f1', or 'val_acc'")
+        raise ValueError(f"Unknown best_metric: {best_metric}. Use 'composite', 'val_auc', 'val_balanced_acc', 'val_f1', 'val_acc', or 'val_mcc'")
