@@ -98,38 +98,65 @@ def train_with_sweep():
     }
     
     try:
-        # Run training
-        main(config_overrides)
+        # Run training using the new clean interface
+        results = main(config_overrides=config_overrides, wandb_run=run)
         
-        # Load results and log final metrics
-        results_dir = Path(config_overrides['save_dir'])
-        results_file = results_dir / 'aggregated_results.json'
+        # Log final aggregated metrics to W&B
+        aggregated_metrics = results['aggregated_metrics']
         
-        if results_file.exists():
-            with open(results_file, 'r') as f:
-                result_data = json.load(f)
-            
-            # Log final metrics to W&B
-            metrics = result_data['aggregated_metrics']
-            wandb.log({
-                'test/f1': metrics.get('test_f1', {}).get('mean', 0.0),
-                'test/accuracy': metrics.get('test_acc', {}).get('mean', 0.0),
-                'test/balanced_accuracy': metrics.get('test_balanced_acc', {}).get('mean', 0.0),
-                'test/auc': metrics.get('test_auc', {}).get('mean', 0.0),
-                'test/precision': metrics.get('test_precision', {}).get('mean', 0.0),
-                'test/recall': metrics.get('test_recall', {}).get('mean', 0.0),
-            })
-            
-            print(f"Trial completed successfully: F1={metrics.get('test_f1', {}).get('mean', 0.0):.4f}")
-        else:
-            print("No results file found")
-            if wandb.run is not None:
-                wandb.log({'test/f1': 0.0})
-            
+        # Log all aggregated metrics with clear naming
+        final_metrics = {
+            'test/f1': aggregated_metrics.get('test_f1', {}).get('mean', 0.0),
+            'test/accuracy': aggregated_metrics.get('test_acc', {}).get('mean', 0.0),
+            'test/balanced_accuracy': aggregated_metrics.get('test_balanced_acc', {}).get('mean', 0.0),
+            'test/auc': aggregated_metrics.get('test_auc', {}).get('mean', 0.0),
+            'test/precision': aggregated_metrics.get('test_precision', {}).get('mean', 0.0),
+            'test/recall': aggregated_metrics.get('test_recall', {}).get('mean', 0.0),
+            'test/sensitivity': aggregated_metrics.get('test_sensitivity', {}).get('mean', 0.0),
+            'test/specificity': aggregated_metrics.get('test_specificity', {}).get('mean', 0.0),
+        }
+        
+        # Log standard deviations
+        final_metrics.update({
+            'test/f1_std': aggregated_metrics.get('test_f1', {}).get('std', 0.0),
+            'test/accuracy_std': aggregated_metrics.get('test_acc', {}).get('std', 0.0),
+            'test/balanced_accuracy_std': aggregated_metrics.get('test_balanced_acc', {}).get('std', 0.0),
+            'test/auc_std': aggregated_metrics.get('test_auc', {}).get('std', 0.0),
+            'test/precision_std': aggregated_metrics.get('test_precision', {}).get('std', 0.0),
+            'test/recall_std': aggregated_metrics.get('test_recall', {}).get('std', 0.0),
+            'test/sensitivity_std': aggregated_metrics.get('test_sensitivity', {}).get('std', 0.0),
+            'test/specificity_std': aggregated_metrics.get('test_specificity', {}).get('std', 0.0),
+        })
+        
+        # Log hyperparameters for easy tracking
+        final_metrics.update({
+            'hyperparams/focal_alpha': config.focal_alpha,
+            'hyperparams/focal_gamma': config.focal_gamma,
+            'hyperparams/learning_rate': config.learning_rate,
+        })
+        
+        wandb.log(final_metrics)
+        
+        print(f"Trial completed successfully!")
+        print(f"Final F1: {final_metrics['test/f1']:.4f} ± {final_metrics['test/f1_std']:.4f}")
+        print(f"Final Accuracy: {final_metrics['test/accuracy']:.4f} ± {final_metrics['test/accuracy_std']:.4f}")
+        print(f"Final AUC: {final_metrics['test/auc']:.4f} ± {final_metrics['test/auc_std']:.4f}")
+        
     except Exception as e:
         print(f"Trial failed: {e}")
+        # Log failure metrics
         if wandb.run is not None:
-            wandb.log({'test/f1': 0.0})
+            wandb.log({
+                'test/f1': 0.0,
+                'test/accuracy': 0.0,
+                'test/balanced_accuracy': 0.0,
+                'test/auc': 0.0,
+                'test/precision': 0.0,
+                'test/recall': 0.0,
+                'test/sensitivity': 0.0,
+                'test/specificity': 0.0,
+                'error': str(e)
+            })
     
     finally:
         wandb.finish()
