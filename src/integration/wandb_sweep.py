@@ -12,9 +12,9 @@ from datetime import datetime
 from train_fusion import main
 
 
-def create_sweep_config():
+def create_quick_sweep_config():
     """
-    Create W&B sweep configuration
+    Create quick W&B sweep configuration for testing (limited parameters)
     """
     sweep_config = {
         'method': 'bayes',  # Bayesian optimization (best choice)
@@ -39,34 +39,70 @@ def create_sweep_config():
         },
         'early_terminate': {
             'type': 'hyperband',
-            'min_iter': 3,
-            'eta': 2
+            'min_iter': 8, # minimum number of epochs/steps a trial is guaranteed to run before its performance is checked.
+            'eta': 2 
         }
     }
     
     return sweep_config
 
 
-def create_quick_sweep_config():
+def create_sweep_config():
     """
-    Create quick W&B sweep configuration for testing
+    Create full W&B sweep configuration for weighted_attention optimization
     """
     sweep_config = {
-        'method': 'random',  # Random search for quick testing
+        'method': 'bayes',  # Bayesian optimization
         'metric': {
-            'name': 'test/f1',
+            'name': 'test/mcc',
             'goal': 'maximize'
         },
         'parameters': {
+            # Fixed: Use weighted_attention fusion model
+            'fusion_model_type': {
+                'value': 'weighted_attention'
+            },
+            
+            # Current loss function parameters (keep these)
             'focal_alpha': {
-                'values': [1.0, 2.0, 3.0]
+                'distribution': 'uniform',
+                'min': 1.0,
+                'max': 3.5
             },
             'focal_gamma': {
-                'values': [0.0, 1.5, 3.0]
+                'distribution': 'uniform', 
+                'min': 0.0,
+                'max': 3.5
             },
             'learning_rate': {
-                'values': [0.001]
+                'values': [0.0005, 0.001, 0.0015]
+            },
+            
+            # NEW: Model capacity parameters for weighted_attention
+            'fusion_dim': {
+                'values': [64, 128, 256, 512]
+            },
+            'hidden_dim': {
+                'values': [64, 128, 256]
+            },
+            'dropout': {
+                'distribution': 'uniform',
+                'min': 0.1,
+                'max': 0.5
+            },
+            
+            # Training parameters
+            'batch_size': {
+                'values': [4, 8, 16]
+            },
+            'scheduler_patience': {
+                'values': [3, 5, 7]
             }
+        },
+        'early_terminate': {
+            'type': 'hyperband',
+            'min_iter': 8,  # Minimum epochs before early termination
+            'eta': 2 
         }
     }
     
@@ -85,9 +121,15 @@ def train_with_sweep():
     
     # Create config overrides
     config_overrides = {
+        'fusion_model_type': config.fusion_model_type,
         'focal_alpha': config.focal_alpha,
         'focal_gamma': config.focal_gamma,
         'learning_rate': config.learning_rate,
+        'fusion_dim': config.fusion_dim,
+        'hidden_dim': config.hidden_dim,
+        'dropout': config.dropout,
+        'batch_size': config.batch_size,
+        'scheduler_patience': config.scheduler_patience,
         'save_dir': f'/home/ssim0068/multimodal-AD/runs/wandb_sweep_{run.id}',
         'num_epochs': 15,
         'n_folds': 5,
@@ -114,6 +156,7 @@ def train_with_sweep():
             'test/recall': aggregated_metrics.get('test_recall', {}).get('mean', 0.0),
             'test/sensitivity': aggregated_metrics.get('test_sensitivity', {}).get('mean', 0.0),
             'test/specificity': aggregated_metrics.get('test_specificity', {}).get('mean', 0.0),
+            'test/mcc': aggregated_metrics.get('test_mcc', {}).get('mean', 0.0),
         }
         
         # Log standard deviations
@@ -126,13 +169,20 @@ def train_with_sweep():
             'test/recall_std': aggregated_metrics.get('test_recall', {}).get('std', 0.0),
             'test/sensitivity_std': aggregated_metrics.get('test_sensitivity', {}).get('std', 0.0),
             'test/specificity_std': aggregated_metrics.get('test_specificity', {}).get('std', 0.0),
+            'test/mcc_std': aggregated_metrics.get('test_mcc', {}).get('std', 0.0),
         })
         
         # Log hyperparameters for easy tracking
         final_metrics.update({
+            'hyperparams/fusion_model_type': config.fusion_model_type,
             'hyperparams/focal_alpha': config.focal_alpha,
             'hyperparams/focal_gamma': config.focal_gamma,
             'hyperparams/learning_rate': config.learning_rate,
+            'hyperparams/fusion_dim': config.fusion_dim,
+            'hyperparams/hidden_dim': config.hidden_dim,
+            'hyperparams/dropout': config.dropout,
+            'hyperparams/batch_size': config.batch_size,
+            'hyperparams/scheduler_patience': config.scheduler_patience,
         })
         
         wandb.log(final_metrics)
@@ -141,6 +191,7 @@ def train_with_sweep():
         print(f"Final F1: {final_metrics['test/f1']:.4f} ± {final_metrics['test/f1_std']:.4f}")
         print(f"Final Accuracy: {final_metrics['test/accuracy']:.4f} ± {final_metrics['test/accuracy_std']:.4f}")
         print(f"Final AUC: {final_metrics['test/auc']:.4f} ± {final_metrics['test/auc_std']:.4f}")
+        print(f"Final MCC: {final_metrics['test/mcc']:.4f} ± {final_metrics['test/mcc_std']:.4f}")
         
     except Exception as e:
         print(f"Trial failed: {e}")
@@ -155,6 +206,7 @@ def train_with_sweep():
                 'test/recall': 0.0,
                 'test/sensitivity': 0.0,
                 'test/specificity': 0.0,
+                'test/mcc': 0.0,
                 'error': str(e)
             })
     
@@ -223,4 +275,4 @@ if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == 'quick':
         create_and_run_sweep(n_trials=2, quick=True)
     else:
-        create_and_run_sweep(n_trials=30, quick=False)
+        create_and_run_sweep(n_trials=60, quick=False)
