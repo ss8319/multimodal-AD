@@ -348,35 +348,26 @@ class SimpleCrossModalAttentionClassifier(nn.Module):
             attention_weights: (optional) Attention weights if requested
         """
         batch_size = x.size(0)
-        
+
         # Split modalities
         protein_x = x[:, :self.protein_dim]
         mri_x = x[:, self.protein_dim:]
-        
+
         # Project to shared embedding space
         protein_emb = self.protein_proj(protein_x)   # [B, shared_dim]
         mri_emb = self.mri_proj(mri_x)               # [B, shared_dim]
-        
-        # Compute attention from protein to MRI
-        # For each protein embedding, compute attention to each MRI embedding
-        attention_input = torch.cat([
-            protein_emb.unsqueeze(1).expand(-1, batch_size, -1),  # [B, B, shared_dim]
-            mri_emb.unsqueeze(0).expand(batch_size, -1, -1)       # [B, B, shared_dim]
-        ], dim=2)  # [B, B, 2*shared_dim]
-        
-        # Reshape for the attention MLP
-        attention_input_flat = attention_input.view(-1, 2 * self.shared_dim)  # [B*B, 2*shared_dim]
-        attention_logits_flat = self.attention(attention_input_flat)  # [B*B, 1]
-        attention_logits = attention_logits_flat.view(batch_size, batch_size)  # [B, B]
-        
-        # Apply softmax to get attention weights
-        attention_weights = F.softmax(attention_logits, dim=1)  # [B, B]
-        
-        # Apply attention to MRI embeddings
-        mri_attended = torch.bmm(
-            attention_weights.unsqueeze(1),  # [B, 1, B]
-            mri_emb.unsqueeze(0).expand(batch_size, -1, -1)  # [B, B, shared_dim]
-        ).squeeze(1)  # [B, shared_dim]
+
+        # Per-sample protein-conditioned gating of MRI embedding (no cross-sample attention)
+        # Gate is a scalar in [0,1] per sample computed from concat([p_emb, m_emb])
+        gate_logits = self.attention(torch.cat([protein_emb, mri_emb], dim=1)).squeeze(1)  # [B]
+        gate = torch.sigmoid(gate_logits).unsqueeze(1)  # [B,1]
+
+        # Apply gating: per-sample blend of MRI and protein embeddings in shared space
+        # Intuition: when gate≈1 rely more on MRI, when gate≈0 blend toward protein signal
+        mri_attended = gate * mri_emb + (1 - gate) * protein_emb  # [B, shared_dim]
+
+        # Store gate as attention weights for interpretability
+        attention_weights = gate  # [B,1]
         
         # Strong residual connection to prevent attention from being too aggressive
         mri_combined = self.residual_alpha * mri_emb + (1 - self.residual_alpha) * mri_attended
@@ -405,12 +396,15 @@ class SimpleCrossModalAttentionClassifier(nn.Module):
         if self.last_attention_weights is None:
             return None
             
+        gate = self.last_attention_weights.squeeze(1)  # [B]
+        # Binary entropy per sample: H(p) = -p log p - (1-p) log(1-p)
+        gate_entropy = -(gate * torch.log(gate + 1e-10) + (1 - gate) * torch.log(1 - gate + 1e-10)).mean().item()
         return {
-            'attention_mean': self.last_attention_weights.mean().item(),
-            'attention_std': self.last_attention_weights.std().item(),
-            'attention_max': self.last_attention_weights.max().item(),
-            'attention_entropy': -(self.last_attention_weights * 
-                                  torch.log(self.last_attention_weights + 1e-10)).sum(1).mean().item()
+            'gate_mean': gate.mean().item(),
+            'gate_std': gate.std().item(),
+            'gate_max': gate.max().item(),
+            'gate_min': gate.min().item(),
+            'gate_binary_entropy': gate_entropy,
         }
 
 
