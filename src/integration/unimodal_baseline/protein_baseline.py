@@ -21,7 +21,8 @@ from sklearn.metrics import (
     roc_auc_score, 
     confusion_matrix, 
     precision_recall_fscore_support,
-    balanced_accuracy_score
+    balanced_accuracy_score,
+    matthews_corrcoef
 )
 
 # Centralized function to add protein module to path
@@ -309,6 +310,12 @@ def evaluate_fold_test(model, scaler, X_test, y_test, fold_idx, model_type='nn')
         y_test, test_preds, average='binary', zero_division=0
     )
     
+    # Calculate MCC (Matthews Correlation Coefficient)
+    # MCC is a balanced measure that considers all four confusion matrix categories
+    # Range: -1 (total disagreement) to +1 (perfect agreement)
+    # Reference: https://scikit-learn.org/stable/modules/generated/sklearn.metrics.matthews_corrcoef.html
+    mcc = matthews_corrcoef(y_test, test_preds)
+    
     results = {
         'fold': fold_idx,
         'test_acc': test_acc,
@@ -317,6 +324,7 @@ def evaluate_fold_test(model, scaler, X_test, y_test, fold_idx, model_type='nn')
         'test_precision': precision,
         'test_recall': recall,
         'test_f1': f1,
+        'test_mcc': mcc,
         'test_cm': test_cm.tolist(),
         'n_test': len(y_test)
     }
@@ -336,6 +344,7 @@ def print_fold_results(results, fold_idx):
     print(f"  Precision: {results['test_precision']:.4f}")
     print(f"  Recall: {results['test_recall']:.4f}")
     print(f"  F1: {results['test_f1']:.4f}")
+    print(f"  MCC: {results['test_mcc']:.4f}")
     
     cm = np.array(results['test_cm'])
     print(f"  Confusion Matrix:")
@@ -364,7 +373,7 @@ def serialize_metrics(metrics):
 
 def aggregate_results(fold_results):
     """Aggregate results across all folds"""
-    metrics_to_aggregate = ['test_acc', 'test_balanced_acc', 'test_auc', 'test_precision', 'test_recall', 'test_f1']
+    metrics_to_aggregate = ['test_acc', 'test_balanced_acc', 'test_auc', 'test_precision', 'test_recall', 'test_f1', 'test_mcc']
     aggregated = {}
     
     print("\n" + "="*60)
@@ -461,14 +470,14 @@ def main(args):
     # Impute missing values with column medians and remove zero-variance features
     protein_df = df[protein_cols].copy()
     
-    # Imputation (median per column)
-    protein_df = protein_df.fillna(protein_df.median(numeric_only=True))
+    # # Imputation (median per column)
+    # protein_df = protein_df.fillna(protein_df.median(numeric_only=True))
     
-    # Zero-variance removal
-    zero_var_cols = protein_df.columns[(protein_df.var(axis=0) == 0)].tolist()
-    if zero_var_cols:
-        print(f"  Removing {len(zero_var_cols)} zero-variance features")
-        protein_df = protein_df.drop(columns=zero_var_cols)
+    # # Zero-variance removal
+    # zero_var_cols = protein_df.columns[(protein_df.var(axis=0) == 0)].tolist()
+    # if zero_var_cols:
+    #     print(f"  Removing {len(zero_var_cols)} zero-variance features")
+    #     protein_df = protein_df.drop(columns=zero_var_cols)
     
     # Align to scaler's training feature order if available
     # Determine scaler directory from scaler path (more direct and consistent)
