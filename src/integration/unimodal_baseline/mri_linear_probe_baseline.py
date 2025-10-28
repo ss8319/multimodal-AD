@@ -83,17 +83,6 @@ def load_brainiac_linear_probe(checkpoint_path: Path, simclr_ckpt_path: Path, de
     model = SingleScanModel(backbone, classifier)
 
     checkpoint = torch.load(str(checkpoint_path), map_location='cpu', weights_only=False)
-    # if isinstance(checkpoint, dict) and 'state_dict' in checkpoint:
-    #     state_dict = checkpoint['state_dict']
-    #     remapped = {}
-    #     for k, v in state_dict.items():
-    #         # Remove potential Lightning 'model.' prefix
-    #         new_key = k[6:] if k.startswith('model.') else k
-    #         remapped[new_key] = v
-    #     state_dict = remapped
-    # else:
-    #     state_dict = checkpoint
-
     # Extract state dict - handle Lightning module format
     if "state_dict" in checkpoint:
         state_dict = checkpoint["state_dict"]
