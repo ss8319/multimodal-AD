@@ -2,6 +2,10 @@
 
 This directory contains scripts for preparing multimodal datasets that combine protein and MRI data.
 
+## compare_preprocessing.py
+Compare NIfTI headers to determine which preprocessing (MNI305 or ICBM152)
+was used for the multimodal dataset images: multimodal-dataset/all/images.
+
 ## prepare_multimodal_dataset.py
 
 Prepares a multimodal dataset by flattening nested MRI directory structures and creating balanced train/test splits.
