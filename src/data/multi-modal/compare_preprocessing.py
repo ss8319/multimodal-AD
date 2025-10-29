@@ -10,7 +10,7 @@ import nibabel as nib
 import numpy as np
 
 # Directories
-MULTIMODAL_DIR = Path("/home/ssim0068/data/multimodal-dataset/all/images")
+MULTIMODAL_DIR = Path("/home/ssim0068/data/multimodal-dataset/all_mni/images")
 MNI305_DIR = Path("/home/ssim0068/data/ADNI_v2/images_mni305")
 ICBM152_DIR = Path("/home/ssim0068/data/ADNI_v2/images_icbm152")
 
