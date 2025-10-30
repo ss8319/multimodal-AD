@@ -15,6 +15,7 @@ Key differences from BrainIAC baseline:
 - Uses DINOv3's slice-wise aggregation for 3D->2D feature extraction
 - Uses sklearn LogisticRegression instead of PyTorch linear probe
 - Requires joblib-saved .pkl model checkpoint
+- Leverages DINOv3's MONAI-based preprocessing pipeline (identical to linear probe experiments)
 """
 
 import argparse
@@ -22,6 +23,7 @@ import json
 from pathlib import Path
 from typing import List, Tuple
 import sys
+import tempfile
 
 import numpy as np
 import pandas as pd
@@ -45,8 +47,9 @@ if _dinov3_root_str not in sys.path:
     sys.path.insert(0, _dinov3_root_str)
 
 # Import DINOv3 modules
-from dinov3.data.transforms import make_classification_eval_transform  # type: ignore
-from dinov3.data.datasets.adni_3d_aggregation import extract_features_with_slice_aggregation  # type: ignore
+from dinov3.data.transforms import make_classification_eval_transform
+from dinov3.data.loaders import make_dataset
+from dinov3.eval.utils import extract_features
 
 
 def normalize_path(path_str: str) -> Path:
@@ -58,34 +61,36 @@ def normalize_path(path_str: str) -> Path:
     return Path(path_str).expanduser().resolve()
 
 
-class PathsLabelsDataset:
-    """Minimal dataset adapter exposing the ADNI-like interface for slice aggregation.
-
-    This dataset provides:
-    - root: kept as empty string; absolute paths will be honored downstream
-    - get_image_relpath(i): returns absolute file path string for index i
-    - get_target(i): integer label for index i
-    - get_targets(): numpy array of labels
-    - transform: image transform for 2D slices
+def create_temp_adni_csv(df_subset: pd.DataFrame, output_path: Path, mri_root: Path) -> None:
+    """Convert multimodal CSV format to ADNI-compatible format.
+    
+    Args:
+        df_subset: Subset of multimodal CSV with 'mri_path' and 'research_group' columns
+        output_path: Where to save temporary ADNI-format CSV
+        mri_root: Root directory containing images (for validation)
     """
-
-    def __init__(self, image_paths: List[str], labels: np.ndarray, transform) -> None:
-        self.root = ""
-        self._paths = image_paths
-        self._labels = labels.astype(int)
-        self.transform = transform
-
-    def __len__(self) -> int:
-        return len(self._paths)
-
-    def get_image_relpath(self, index: int) -> str:
-        return self._paths[index]
-
-    def get_target(self, index: int) -> int:
-        return int(self._labels[index])
-
-    def get_targets(self) -> np.ndarray:
-        return self._labels.copy()
+    adni_data = []
+    
+    for _, row in df_subset.iterrows():
+        # Extract pat_id from mri_path filename
+        # e.g., /path/to/126_S_0606.nii.gz -> 126_S_0606
+        mri_path = Path(row['mri_path'])
+        pat_id = mri_path.stem.replace('.nii', '')  # Remove .nii if present (.nii.gz -> .nii -> '')
+        
+        # Convert research_group to binary label
+        label = 1 if row['research_group'] == 'AD' else 0
+        
+        adni_data.append({
+            'pat_id': pat_id,
+            'label': label,
+        })
+    
+    # Save to CSV
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(adni_data).to_csv(output_path, index=False)
+    
+    print(f"  Created temp ADNI CSV: {output_path}")
+    print(f"    {len(adni_data)} samples: {sum(d['label'] for d in adni_data)} AD, {len(adni_data) - sum(d['label'] for d in adni_data)} CN")
 
 def load_dinov3_model(hub_repo_dir: Path, hub_model: str, pretrained_weights: Path, device: torch.device) -> nn.Module:
     """
@@ -164,12 +169,17 @@ def evaluate_fold(
     df: pd.DataFrame,
     test_indices: np.ndarray,
     mri_root: Path,
+    temp_csv_dir: Path,
+    fold_idx: int,
     image_size: int = 224,
     slice_axis: int = 0,
     stride: int = 2,
 ) -> dict:
     """
     Run inference for a single fold's test set and compute metrics.
+    
+    Uses DINOv3's dataset infrastructure (make_dataset + SliceAggregationDataset)
+    to ensure identical preprocessing as linear probe experiments.
     
     Args:
         dinov3_model: Pretrained DINOv3 backbone
@@ -178,6 +188,8 @@ def evaluate_fold(
         df: Full dataframe with all samples
         test_indices: Indices of test samples for this fold
         mri_root: Root directory containing NIfTI images
+        temp_csv_dir: Directory for temporary ADNI-format CSVs
+        fold_idx: Fold index (for temp CSV naming)
         image_size: Image size for DINOv3 transforms
         slice_axis: Axis to slice along (0=sagittal, 1=coronal, 2=axial)
         stride: Slice stride for aggregation
@@ -188,31 +200,35 @@ def evaluate_fold(
     # Get test subset
     df_test = df.iloc[test_indices].reset_index(drop=True)
 
-    # Build image paths and labels directly from CSV columns
+    # Validate required columns
     if 'mri_path' not in df_test.columns or 'research_group' not in df_test.columns:
         raise KeyError("CSV must contain 'mri_path' and 'research_group' columns for DINOv3 baseline")
 
-    image_paths = [str(normalize_path(p)) for p in df_test['mri_path'].tolist()]
-    labels = (df_test['research_group'] == 'AD').astype(int).to_numpy()
+    # Create temporary ADNI-format CSV
+    temp_csv_path = temp_csv_dir / f"dinov3_baseline_fold{fold_idx}_test.csv"
+    create_temp_adni_csv(df_test, temp_csv_path, mri_root)
 
-    # Create transform and dataset adapter
+    # Build dataset using DINOv3's make_dataset (automatically wraps with SliceAggregationDataset)
     transform = make_classification_eval_transform(
         resize_size=image_size,
         crop_size=image_size
     )
-
-    dataset = PathsLabelsDataset(image_paths=image_paths, labels=labels, transform=transform)
-    print(f"  Created dataset from CSV: {len(dataset)} samples")
+    
+    dataset_str = f"ADNI:split=TEST:root={mri_root}:extra={temp_csv_dir}:csv_filename={temp_csv_path.name}"
+    dataset = make_dataset(
+        dataset_str=dataset_str,
+        transform=transform,
+    )
+    
+    print(f"  Created DINOv3 dataset: {len(dataset)} samples")
         
-    # Extract features using slice-wise aggregation
-    features, labels_tensor = extract_features_with_slice_aggregation(
+    # Extract features using DINOv3's extract_features (routes to slice aggregation automatically)
+    features, labels_tensor = extract_features(
         model=dinov3_model,
         dataset=dataset,
         batch_size=1,
         num_workers=0,
-        device=str(device),
-        slice_axis=slice_axis,
-        stride=stride
+        gather_on_cpu=True  # Ensure features are on CPU for sklearn
     )
 
     # Convert to numpy
@@ -236,6 +252,9 @@ def evaluate_fold(
     test_auc = _safe_auc_score(y_true, y_prob)
     test_cm = confusion_matrix(y_true, y_pred, labels=[0, 1])
     test_mcc = float(matthews_corrcoef(y_true, y_pred))
+
+    # Clean up temp CSV
+    temp_csv_path.unlink(missing_ok=True)
 
     return {
         'test_acc': test_acc,
@@ -393,30 +412,44 @@ def main():
     logreg_model = load_sklearn_logreg(checkpoint_path)
     print()
 
-    fold_results = []
-    for fold_idx, split in enumerate(cv_splits, start=1):
-        # Expect protein/fusion-style splits with 'test' indices
-        if 'test' not in split:
-            raise KeyError("CV split must contain 'test' key with indices to evaluate")
-        test_idx = np.asarray(split['test'], dtype=int)
+    # Create temporary directory for ADNI-format CSVs
+    temp_csv_dir = Path(tempfile.mkdtemp(prefix="dinov3_baseline_"))
+    print(f"Using temp directory for CSVs: {temp_csv_dir}")
+    print()
 
-        print("-"*60)
-        print(f"FOLD {fold_idx}/{len(cv_splits)}  |  Test size: {len(test_idx)}")
+    try:
+        fold_results = []
+        for fold_idx, split in enumerate(cv_splits, start=1):
+            # Expect protein/fusion-style splits with 'test' indices
+            if 'test' not in split:
+                raise KeyError("CV split must contain 'test' key with indices to evaluate")
+            test_idx = np.asarray(split['test'], dtype=int)
 
-        res = evaluate_fold(
-            dinov3_model=dinov3_model,
-            logreg_model=logreg_model,
-            device=device,
-            df=df,
-            test_indices=test_idx,
-            mri_root=mri_root,
-            image_size=args.image_size,
-            slice_axis=args.slice_axis,
-            stride=args.stride,
-        )
-        res['fold'] = fold_idx
-        fold_results.append(res)
-        print_fold_results(res, fold_idx)
+            print("-"*60)
+            print(f"FOLD {fold_idx}/{len(cv_splits)}  |  Test size: {len(test_idx)}")
+
+            res = evaluate_fold(
+                dinov3_model=dinov3_model,
+                logreg_model=logreg_model,
+                device=device,
+                df=df,
+                test_indices=test_idx,
+                mri_root=mri_root,
+                temp_csv_dir=temp_csv_dir,
+                fold_idx=fold_idx,
+                image_size=args.image_size,
+                slice_axis=args.slice_axis,
+                stride=args.stride,
+            )
+            res['fold'] = fold_idx
+            fold_results.append(res)
+            print_fold_results(res, fold_idx)
+    finally:
+        # Clean up temp directory
+        import shutil
+        if temp_csv_dir.exists():
+            shutil.rmtree(temp_csv_dir)
+            print(f"\nCleaned up temp directory: {temp_csv_dir}")
 
     aggregated, total_cm = aggregate_results(fold_results)
 
