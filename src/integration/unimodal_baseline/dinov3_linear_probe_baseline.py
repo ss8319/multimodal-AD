@@ -215,6 +215,7 @@ def evaluate_fold(
     )
     
     dataset_str = f"ADNI:split=TEST:root={mri_root}:extra={temp_csv_dir}:csv_filename={temp_csv_path.name}"
+    print(f"  Building dataset with string: {dataset_str}")
     dataset = make_dataset(
         dataset_str=dataset_str,
         transform=transform,
@@ -235,13 +236,23 @@ def evaluate_fold(
     features_np = features.cpu().numpy()  # [N, feature_dim]
     labels_np = labels_tensor.cpu().numpy()  # [N]
 
-    print(f"  Extracted features: {features_np.shape}")
+    print(f"  Extracted features: shape={features_np.shape}, dtype={features_np.dtype}")
+    print(f"    Feature stats: min={features_np.min():.4f}, max={features_np.max():.4f}, mean={features_np.mean():.4f}, std={features_np.std():.4f}")
+    print(f"    Labels: {len(labels_np)} samples, AD={int((labels_np == 1).sum())}, CN={int((labels_np == 0).sum())}")
 
-    # Get predictions from sklearn LogisticRegression
-    probas = logreg_model.predict_proba(features_np)  # [N, 2]
-    y_prob = probas[:, 1]  # Probability of AD (class 1)
-    y_pred = logreg_model.predict(features_np)  # [N]
+    # Batch prediction: Get predictions for all test samples at once
+    # features_np shape: [N, feature_dim] where N = number of test samples
+    print(f"  Running sklearn batch inference on {len(features_np)} samples...")
+    probas = logreg_model.predict_proba(features_np)  # [N, 2] - all samples in one batch
+    y_prob = probas[:, 1]  # Probability of AD (class 1) for each sample
+    y_pred = logreg_model.predict(features_np)  # [N] - all predictions in one batch
     y_true = labels_np.astype(int)
+
+    # Show prediction statistics
+    print(f"  Predictions summary:")
+    print(f"    Probabilities: min={y_prob.min():.4f}, max={y_prob.max():.4f}, mean={y_prob.mean():.4f}")
+    print(f"    Predicted classes: AD={int((y_pred == 1).sum())}, CN={int((y_pred == 0).sum())}")
+    
 
     # Compute metrics
     test_acc = float(accuracy_score(y_true, y_pred))
