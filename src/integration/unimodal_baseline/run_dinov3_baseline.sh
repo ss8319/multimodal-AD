@@ -24,8 +24,8 @@ mkdir -p logs
 # =============================================================================
 
 # Data paths
-DATA_CSV="/home/ssim0068/data/multimodal-dataset/all.csv"
-MRI_ROOT="/home/ssim0068/data/ADNI_v2/images_mni305"
+DATA_CSV="/home/ssim0068/data/multimodal-dataset/all_mni.csv"
+MRI_ROOT="/home/ssim0068/data/multimodal-dataset/all_mni/images"
 
 # CV splits from fusion experiment (must match protein/fusion baselines)
 CV_SPLITS_JSON="/home/ssim0068/multimodal-AD/runs/fusion_weighted_attention_nn_5fold_cv/cv_splits.json"
@@ -35,12 +35,12 @@ DINOV3_HUB_DIR="/home/ssim0068/multimodal-AD/src/mri/dinov3"
 DINOV3_MODEL="dinov3_vits16"  # Options: dinov3_vits16, dinov3_vitb16, dinov3_vitl16
 PRETRAINED_WEIGHTS="/home/ssim0068/multimodal-AD/src/mri/dinov3/weights/dinov3_vits16_pretrain_lvd1689m-08c60483.pth"
 
-# Trained logistic regression checkpoint (from DINOv3 training run)
-# This should be the final_logreg_model.pkl saved during training
-CHECKPOINT_PATH="/home/ssim0068/multimodal-AD/src/mri/dinov3/runs/adni_full_test_20251028_153004/final_logreg_model.pkl"
+# Trained logistic regression checkpoint (from DINOv3 linear probe training)
+# Use the model trained on ADNI data (not contaminated with multimodal dataset)
+CHECKPOINT_PATH="/home/ssim0068/multimodal-AD/src/mri/dinov3/runs/adni_full_test_20251030_151635/final_logreg_model.pkl"
 
 # Output directory
-SAVE_DIR="/home/ssim0068/multimodal-AD/runs/dinov3_baseline_$(date +%Y%m%d_%H%M%S)"
+SAVE_DIR="/home/ssim0068/multimodal-AD/runs/dinov3_smri_baseline_$(date +%Y%m%d_%H%M%S)"
 
 # =============================================================================
 # DINOv3-SPECIFIC PARAMETERS
