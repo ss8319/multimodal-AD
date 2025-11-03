@@ -5,14 +5,12 @@ import numpy as np
 from pathlib import Path
 import sys
 
-# Add paths for protein and MRI modules
-sys.path.append(str(Path(__file__).parent.parent / "mri" / "BrainIAC" / "src"))
+# Add paths for protein modules
 sys.path.append(str(Path(__file__).parent.parent / "protein"))
 
 # Import from correct modules
-from dataset import BrainAgeDataset, get_validation_transform
-from load_brainiac import load_brainiac
 from protein_extractor import ProteinLatentExtractor
+from mri_extractors import BaseMRIExtractor
 
 
 class MultimodalDataset(Dataset):
@@ -29,8 +27,7 @@ class MultimodalDataset(Dataset):
     def __init__(
         self,
         csv_path,
-        brainiac_model=None,
-        brainiac_checkpoint=None,
+        mri_extractor: BaseMRIExtractor,
         protein_run_dir=None,
         protein_latents_dir=None,
         protein_model_type='nn',
@@ -40,9 +37,8 @@ class MultimodalDataset(Dataset):
     ):
         """
         Args:
-            csv_path: Path to train.csv or test.csv
-            brainiac_model: Pre-loaded BrainIAC model (recommended for efficiency)
-            brainiac_checkpoint: Path to BrainIAC checkpoint (if model not provided)
+            csv_path: Path to CSV with multimodal data
+            mri_extractor: MRI feature extractor (BrainIACExtractor or DINOv3Extractor)
             protein_run_dir: Path to protein model run directory (for on-the-fly extraction)
             protein_latents_dir: Path to pre-extracted protein latents directory (recommended)
             protein_model_type: 'nn' (Neural Network) or 'transformer'
@@ -52,6 +48,7 @@ class MultimodalDataset(Dataset):
         """
         self.csv_path = Path(csv_path)
         self.device = device
+        self.mri_extractor = mri_extractor
         
         # Load CSV
         self.df = pd.read_csv(csv_path)
@@ -101,18 +98,6 @@ class MultimodalDataset(Dataset):
         else:
             print(f"  No protein model - using raw features")
         
-        # Load or store BrainIAC model
-        if brainiac_model is not None:
-            self.mri_model = brainiac_model
-            print(f"  Using provided BrainIAC model")
-        elif brainiac_checkpoint is not None:
-            print(f"  Loading BrainIAC from: {brainiac_checkpoint}")
-            self.mri_model = load_brainiac(brainiac_checkpoint, device)
-        else:
-            raise ValueError("Must provide either brainiac_model or brainiac_checkpoint")
-        
-        self.mri_model.eval()
-        
         # Get dimensions
         self.raw_protein_dim = len(self.protein_columns)
         
@@ -131,7 +116,8 @@ class MultimodalDataset(Dataset):
         else:
             self.protein_dim = self.raw_protein_dim  # Use raw features
         
-        self.mri_dim = 768  # BrainIAC output dimension
+        # Get MRI dimension from extractor
+        self.mri_dim = self.mri_extractor.feature_dim
         self.fused_dim = self.protein_dim + self.mri_dim
         
         print(f"  Feature dimensions: protein={self.protein_dim} (raw={self.raw_protein_dim}), mri={self.mri_dim}, fused={self.fused_dim}")
@@ -248,89 +234,6 @@ class MultimodalDataset(Dataset):
             protein_values = row[self.protein_columns].values.astype(np.float32)
             return protein_values
     
-    def _extract_mri_latents(self, mri_path):
-        """
-        Extract MRI latents using BrainIAC model with comprehensive error handling
-        This is done on-the-fly during training
-        """
-        try:
-            import nibabel as nib
-            from monai.transforms import (
-                Compose, LoadImaged, EnsureChannelFirstd, 
-                Resized, NormalizeIntensityd, EnsureTyped
-            )
-            
-            # Validate file exists and is readable
-            mri_path = Path(mri_path)
-            if not mri_path.exists():
-                raise FileNotFoundError(f"MRI file not found: {mri_path}")
-            
-            if not mri_path.is_file():
-                raise ValueError(f"MRI path is not a file: {mri_path}")
-            
-            # Check file size (basic corruption check)
-            file_size = mri_path.stat().st_size
-            if file_size < 1024:  # Less than 1KB is suspicious
-                raise ValueError(f"MRI file too small ({file_size} bytes): {mri_path}")
-            
-            # Load and preprocess MRI image
-            # Using MONAI transforms similar to BrainIAC dataset
-            transform = Compose([
-                LoadImaged(keys=["image"]),
-                EnsureChannelFirstd(keys=["image"]),
-                Resized(keys=["image"], spatial_size=(96, 96, 96), mode="trilinear"),
-                NormalizeIntensityd(keys=["image"], nonzero=True, channel_wise=True),
-                EnsureTyped(keys=["image"])
-            ])
-            
-            # Load image
-            sample = {"image": str(mri_path)}
-            sample = transform(sample)
-            image = sample["image"].unsqueeze(0).to(self.device)  # [1, 1, 96, 96, 96]
-            
-            # Validate image dimensions
-            if image.shape != (1, 1, 96, 96, 96):
-                raise ValueError(f"Unexpected image shape {image.shape}, expected (1, 1, 96, 96, 96)")
-            
-            # Check for NaN or infinite values
-            if torch.isnan(image).any():
-                raise ValueError(f"NaN values detected in MRI image: {mri_path}")
-            
-            if torch.isinf(image).any():
-                raise ValueError(f"Infinite values detected in MRI image: {mri_path}")
-            
-            # Extract features
-            with torch.no_grad():
-                features = self.mri_model(image)  # [1, 768]
-                features = features.cpu().numpy().flatten()  # [768]
-            
-            # Validate output features
-            if len(features) != 768:
-                raise ValueError(f"Unexpected feature dimension {len(features)}, expected 768")
-            
-            if np.isnan(features).any():
-                raise ValueError(f"NaN values in extracted MRI features: {mri_path}")
-            
-            if np.isinf(features).any():
-                raise ValueError(f"Infinite values in extracted MRI features: {mri_path}")
-            
-            return features
-            
-        except FileNotFoundError as e:
-            self.error_stats['mri_file_not_found'] += 1
-            print(f"ERROR: MRI file not found: {e}")
-            return np.zeros(768, dtype=np.float32)
-            
-        except ValueError as e:
-            self.error_stats['mri_data_validation_failed'] += 1
-            print(f"ERROR: MRI data validation failed: {e}")
-            return np.zeros(768, dtype=np.float32)
-            
-        except Exception as e:
-            self.error_stats['mri_processing_failed'] += 1
-            print(f"ERROR: MRI processing failed for {mri_path}: {e}")
-            print(f"  Error type: {type(e).__name__}")
-            return np.zeros(768, dtype=np.float32)
     
     def __getitem__(self, idx):
         """
@@ -362,11 +265,11 @@ class MultimodalDataset(Dataset):
             # Extract protein features
             protein_feat = self._extract_protein_features(idx)  # [protein_dim]
             
-            # Extract MRI latents on-the-fly
-            mri_feat = self._extract_mri_latents(mri_path)  # [768]
+            # Extract MRI latents via extractor
+            mri_feat = self.mri_extractor.extract_features(Path(mri_path))  # [mri_dim]
             
             # Concatenate features
-            fused_feat = np.concatenate([protein_feat, mri_feat])  # [protein_dim + 768]
+            fused_feat = np.concatenate([protein_feat, mri_feat])  # [protein_dim + mri_dim]
             
             # Get label: AD=1, CN=0
             research_group = row['research_group']
@@ -402,13 +305,13 @@ class MultimodalDataset(Dataset):
             }
 
 
-def get_dataloader(csv_path, brainiac_model, protein_run_dir=None, batch_size=4, shuffle=True, device='cpu'):
+def get_dataloader(csv_path, mri_extractor, protein_run_dir=None, batch_size=4, shuffle=True, device='cpu'):
     """
     Convenience function to create DataLoader
     
     Args:
-        csv_path: Path to train.csv or test.csv
-        brainiac_model: Pre-loaded BrainIAC model
+        csv_path: Path to CSV file
+        mri_extractor: MRI feature extractor (BrainIACExtractor or DINOv3Extractor)
         protein_run_dir: Path to protein model run directory (optional)
         batch_size: Batch size (default: 4)
         shuffle: Whether to shuffle (True for train, False for test)
@@ -421,7 +324,7 @@ def get_dataloader(csv_path, brainiac_model, protein_run_dir=None, batch_size=4,
     
     dataset = MultimodalDataset(
         csv_path=csv_path,
-        brainiac_model=brainiac_model,
+        mri_extractor=mri_extractor,
         protein_run_dir=protein_run_dir,
         device=device
     )
@@ -442,18 +345,21 @@ if __name__ == "__main__":
     print("Testing MultimodalDataset...")
     
     # Paths
-    train_csv = "/home/ssim0068/data/multimodal-dataset/train.csv"
-    brainiac_ckpt = "/home/ssim0068/code/multimodal-AD/BrainIAC/src/checkpoints/BrainIAC.ckpt"
+    train_csv = "/home/ssim0068/data/multimodal-dataset/all_mni.csv"
     
-    # Load BrainIAC model once
-    print("\nLoading BrainIAC model...")
-    mri_model = load_brainiac(brainiac_ckpt, 'cpu')
+    # Create MRI extractor
+    print("\nLoading MRI extractor...")
+    from mri_extractors import BrainIACExtractor
+    mri_extractor = BrainIACExtractor(
+        checkpoint_path="/home/ssim0068/code/multimodal-AD/BrainIAC/src/checkpoints/BrainIAC.ckpt",
+        device='cpu'
+    )
     
     # Create dataset (using raw protein features for now)
     print("\nCreating dataset...")
     dataset = MultimodalDataset(
         csv_path=train_csv,
-        brainiac_model=mri_model,
+        mri_extractor=mri_extractor,
         protein_run_dir=None,  # Use raw features
         device='cpu'
     )
