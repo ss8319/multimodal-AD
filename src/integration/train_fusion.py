@@ -323,10 +323,19 @@ def main(config_overrides=None, wandb_run=None):
     # Configuration
     config = {
         # Data paths
-        'data_csv': '/home/ssim0068/data/multimodal-dataset/all.csv',  # All data for CV
+        'data_csv': '/home/ssim0068/data/multimodal-dataset/all_mni.csv',  # All data for CV
         'brainiac_checkpoint': '/home/ssim0068/code/multimodal-AD/BrainIAC/src/checkpoints/BrainIAC.ckpt',
         'protein_run_dir': '/home/ssim0068/multimodal-AD/src/protein/runs/run_20251016_205054',
         'protein_latents_dir': None,
+        
+        # MRI Encoder config
+        'mri_encoder': 'dinov3',  # Options: 'brainiac', 'dinov3'
+        'dinov3_hub_repo': '/home/ssim0068/multimodal-AD/src/mri/dinov3',
+        'dinov3_model': 'dinov3_vits16',  # dinov3_vits16 (384-dim) or dinov3_vitb16 (768-dim)
+        'dinov3_weights': '/home/ssim0068/multimodal-AD/src/mri/dinov3/weights/dinov3_vits16_pretrain_lvd1689m-08c60483.pth',
+        'dinov3_slice_axis': 0,  # 0=sagittal, 1=coronal, 2=axial
+        'dinov3_stride': 2,  # Extract every Nth slice
+        'dinov3_image_size': 224,  # 2D crop size
         
         # Model config
         'protein_model_type': 'nn',  # 'nn' (Neural Network) or 'transformer'
@@ -354,7 +363,7 @@ def main(config_overrides=None, wandb_run=None):
         'focal_gamma': 2.0,        # Focusing parameter; when gamma is 0, the loss is equivalent to the cross entropy loss.
         
         # Model selection metric
-        'best_metric': 'val_mcc',  # Options: 'composite', 'val_auc', 'val_balanced_acc', 'val_f1', 'val_acc', val_mcc'
+        'best_metric': 'composite',  # Options: 'composite', 'val_auc', 'val_balanced_acc', 'val_f1', 'val_acc', val_mcc'
 
         # Weights & Biases defaults (env overrides supported)
         'wandb_project': os.environ.get('WANDB_PROJECT') or 'multimodal-ad',
@@ -369,13 +378,27 @@ def main(config_overrides=None, wandb_run=None):
     
     # Create meaningful save directory name with model info (only if not provided in overrides)
     if 'save_dir' not in config:
-        config['save_dir'] = f'/home/ssim0068/multimodal-AD/runs/{config["fusion_model_type"]}_{config["protein_model_type"]}'
+        # Include MRI encoder in save directory name
+        encoder_suffix = config['mri_encoder']
+        if config['mri_encoder'] == 'dinov3':
+            # Extract model variant (e.g., "vits16" from "dinov3_vits16")
+            model_variant = config['dinov3_model'].replace('dinov3_', '')
+            encoder_suffix = f"dinov3_{model_variant}"
+        
+        config['save_dir'] = (
+            f'/home/ssim0068/multimodal-AD/runs/'
+            f'{config["fusion_model_type"]}_{config["protein_model_type"]}_{encoder_suffix}'
+        )
     
     print("="*60)
     print("MULTIMODAL FUSION TRAINING - CROSS-VALIDATION")
     print("="*60)
     print(f"Model: Fusion (protein + MRI)")
     print(f"Protein model: {config['protein_model_type']} ({config['protein_layer']})")
+    print(f"MRI encoder: {config['mri_encoder']}")
+    if config['mri_encoder'] == 'dinov3':
+        print(f"  DINOv3 model: {config['dinov3_model']}")
+        print(f"  Slice axis: {config['dinov3_slice_axis']}, Stride: {config['dinov3_stride']}")
     print(f"Fusion model: {config['fusion_model_type']}")
     print(f"N-folds: {config['n_folds']}")
     print(f"Split ratio: {config['split_ratio']}")
@@ -436,9 +459,29 @@ def main(config_overrides=None, wandb_run=None):
         base_wandb_run = None
         wandb_run_created = False
     
-    # Load BrainIAC model once (shared across all folds)
-    print("Loading BrainIAC model...")
-    brainiac_model = load_brainiac(config['brainiac_checkpoint'], device)
+    # Load MRI feature extractor (shared across all folds)
+    print(f"Loading MRI encoder: {config['mri_encoder']}")
+    from mri_extractors import BrainIACExtractor, DINOv3Extractor
+    
+    if config['mri_encoder'] == 'brainiac':
+        mri_extractor = BrainIACExtractor(
+            checkpoint_path=config['brainiac_checkpoint'],
+            device=device
+        )
+    elif config['mri_encoder'] == 'dinov3':
+        mri_extractor = DINOv3Extractor(
+            model_name=config['dinov3_model'],
+            weights_path=config['dinov3_weights'],
+            hub_repo_dir=config['dinov3_hub_repo'],
+            device=device,
+            slice_axis=config['dinov3_slice_axis'],
+            stride=config['dinov3_stride'],
+            image_size=config['dinov3_image_size']
+        )
+    else:
+        raise ValueError(f"Unknown mri_encoder: {config['mri_encoder']}. Choose 'brainiac' or 'dinov3'")
+    
+    print(f"  MRI feature dimension: {mri_extractor.feature_dim}")
     print()
     
     # Create CV splits
@@ -490,7 +533,7 @@ def main(config_overrides=None, wandb_run=None):
         # Create full dataset
         full_dataset = MultimodalDataset(
             csv_path=config['data_csv'],
-            brainiac_model=brainiac_model,
+            mri_extractor=mri_extractor,
             protein_run_dir=config['protein_run_dir'],
             protein_latents_dir=config.get('protein_latents_dir'),
             protein_model_type=config['protein_model_type'],
@@ -515,6 +558,7 @@ def main(config_overrides=None, wandb_run=None):
             torch.cuda.manual_seed(config['model_seed'])
         
         protein_dim = full_dataset.protein_dim
+        mri_dim = full_dataset.mri_dim  # Get MRI dimension from extractor (384 or 768)
         
         # Print feature statistics only on fold 0 to avoid spam
         if fold_idx == 0:
@@ -524,14 +568,14 @@ def main(config_overrides=None, wandb_run=None):
         if config['fusion_model_type'] == 'simple':
             model = get_model(
                 protein_dim=protein_dim,
-                mri_dim=768,
+                mri_dim=mri_dim,
                 hidden_dim=config['hidden_dim'],
                 dropout=config['dropout']
             ).to(device)
         elif config['fusion_model_type'] == 'weighted_attention':
             model = get_weighted_fusion_model(
                 protein_dim=protein_dim,
-                mri_dim=768,
+                mri_dim=mri_dim,
                 fusion_dim=config['fusion_dim'],
                 hidden_dim=config['hidden_dim'],
                 dropout=config['dropout']
@@ -539,7 +583,7 @@ def main(config_overrides=None, wandb_run=None):
         elif config['fusion_model_type'] == 'asymmetric':
             model = get_asymmetric_fusion_model(
                 protein_dim=protein_dim,
-                mri_dim=768,
+                mri_dim=mri_dim,
                 protein_proj_dim=96,  # Modest expansion for protein
                 mri_proj_dim=160,     # More capacity for MRI
                 hidden_dim=config['hidden_dim'],
@@ -548,7 +592,7 @@ def main(config_overrides=None, wandb_run=None):
         elif config['fusion_model_type'] == 'cross_modal_attention':
             model = get_simple_cross_modal_attention_model(
                 protein_dim=protein_dim,
-                mri_dim=768,
+                mri_dim=mri_dim,
                 shared_dim=64,  # Smaller dimension for simpler model
                 hidden_dim=config['hidden_dim'],
                 dropout=config['dropout'],
