@@ -32,6 +32,16 @@ dev = [
     "pytest>=7.4.0",
     "pytest-cov>=4.1.0",
 ]
+dinov3 = [
+    "ftfy",
+    "omegaconf",
+    "regex",
+    "submitit",
+    "termcolor",
+    "transformers",
+    "torchvision",
+    "accelerate",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src"]
