@@ -86,7 +86,7 @@ class SimpleFusionClassifier(nn.Module):
         """
         # Split modalities
         protein_x = x[:, :self.protein_dim]          # [B, protein_dim]
-        mri_x = x[:, self.protein_dim:]               # [B, mri_dim]
+        mri_x = x[:, self.protein_dim: self.protein_dim + self.mri_dim]  # [B, mri_dim]
         
         # Project to shared dimension
         protein_proj = self.protein_proj(protein_x)  # [B, shared_dim]
@@ -192,7 +192,7 @@ class WeightedFusionAttentionClassifier(nn.Module):
         """
         # Split modalities
         protein_x = x[:, :self.protein_dim]  # [B, protein_dim]
-        mri_x = x[:, self.protein_dim:]      # [B, mri_dim]
+        mri_x = x[:, self.protein_dim: self.protein_dim + self.mri_dim]     # [B, mri_dim]
         
         # Project to shared space
         p_embed = self.protein_proj(protein_x)  # [B, fusion_dim]
@@ -351,7 +351,7 @@ class SimpleCrossModalAttentionClassifier(nn.Module):
 
         # Split modalities
         protein_x = x[:, :self.protein_dim]
-        mri_x = x[:, self.protein_dim:]
+        mri_x = x[:, self.protein_dim: self.protein_dim + self.mri_dim]
 
         # Project to shared embedding space
         protein_emb = self.protein_proj(protein_x)   # [B, shared_dim]
@@ -473,7 +473,7 @@ class AsymmetricFusionClassifier(nn.Module):
     def forward(self, x):
         # Split modalities
         protein_x = x[:, :self.protein_dim]
-        mri_x = x[:, self.protein_dim:]
+        mri_x = x[:, self.protein_dim: self.protein_dim + self.mri_dim]
         
         # Asymmetric projections
         protein_proj = self.protein_proj(protein_x)
@@ -676,7 +676,7 @@ class CrossTransformerFusionClassifier(nn.Module):
         
         # Split modalities
         protein_x = x[:, :self.protein_dim]  # [B, protein_dim]
-        mri_x = x[:, self.protein_dim:]       # [B, mri_dim]
+        mri_x = x[:, self.protein_dim: self.protein_dim + self.mri_dim]  # [B, mri_dim]
         
         # Project to shared embedding space
         protein_emb = self.protein_proj(protein_x)  # [B, embed_dim]
@@ -871,7 +871,7 @@ class KroneckerProductFusionClassifier(nn.Module):
         
         # Split modalities
         protein_x = x[:, :self.protein_dim]  # [B, protein_dim]
-        mri_x = x[:, self.protein_dim:]      # [B, mri_dim]
+        mri_x = x[:, self.protein_dim: self.protein_dim + self.mri_dim]  # [B, mri_dim]
         
         # Compute Kronecker product efficiently using broadcasting
         # Reshape for outer product: [B, protein_dim, 1] × [B, 1, mri_dim]
