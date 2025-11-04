@@ -23,7 +23,11 @@ from datetime import datetime
 sys.path.append(str(Path(__file__).parent.parent / "mri" / "BrainIAC" / "src"))
 
 from multimodal_dataset import MultimodalDataset
-from fusion_model import get_model, get_weighted_fusion_model, get_asymmetric_fusion_model, get_simple_cross_modal_attention_model
+from fusion_model import (
+    get_model, get_weighted_fusion_model, get_asymmetric_fusion_model, 
+    get_simple_cross_modal_attention_model, get_cross_transformer_fusion_model,
+    get_kronecker_product_fusion_model
+)
 from load_brainiac import load_brainiac
 from utils import MetricsCalculator, WandBLogger, VisualizationCreator, aggregate_cv_results, print_results, compute_best_score
 
@@ -323,13 +327,13 @@ def main(config_overrides=None, wandb_run=None):
     # Configuration
     config = {
         # Data paths
-        'data_csv': '/home/ssim0068/data/multimodal-dataset/all_mni.csv',  # All data for CV
+        'data_csv': '/home/ssim0068/data/multimodal-dataset/all_icbm.csv',  # All data for CV
         'brainiac_checkpoint': '/home/ssim0068/code/multimodal-AD/BrainIAC/src/checkpoints/BrainIAC.ckpt',
         'protein_run_dir': '/home/ssim0068/multimodal-AD/src/protein/runs/run_20251016_205054',
         'protein_latents_dir': None,
         
         # MRI Encoder config
-        'mri_encoder': 'dinov3',  # Options: 'brainiac', 'dinov3'
+        'mri_encoder': 'brainiac',  # Options: 'brainiac', 'dinov3'
         'dinov3_hub_repo': '/home/ssim0068/multimodal-AD/src/mri/dinov3',
         'dinov3_model': 'dinov3_vits16',  # dinov3_vits16 (384-dim) or dinov3_vitb16 (768-dim)
         'dinov3_weights': '/home/ssim0068/multimodal-AD/src/mri/dinov3/weights/dinov3_vits16_pretrain_lvd1689m-08c60483.pth',
@@ -340,10 +344,20 @@ def main(config_overrides=None, wandb_run=None):
         # Model config
         'protein_model_type': 'nn',  # 'nn' (Neural Network) or 'transformer'
         'protein_layer': 'last_hidden_layer',  # 'last_hidden_layer' for NN, 'transformer_embeddings' for Transformer
-        'fusion_model_type': 'weighted_attention',  # 'simple', 'weighted_attention', 'asymmetric', 'cross_modal_attention'
+        'fusion_model_type': 'kronecker',  # 'simple', 'weighted_attention', 'asymmetric', 'cross_modal_attention', 'cross_transformer', 'kronecker'
         'hidden_dim': 128, #params for the fusion model
         'fusion_dim': 128, #params for weighted fusion model (shared embedding dimension)
-        'dropout': 0.3, #params for the fusion model
+        'dropout': 0.3,
+         #params for the fusion model
+        
+        # Cross-transformer specific params
+        'cross_transformer_embed_dim': 256,  # Shared embedding dimension
+        'cross_transformer_num_heads': 4,  # Number of attention heads
+        'cross_transformer_ff_dim': None,  # Feed-forward dim (None = 4 * embed_dim)
+        'cross_transformer_dropout': 0.1,  # Dropout for transformer layers
+        
+        # Kronecker product specific params
+        'kronecker_projected_dim': 512,  # Projection dim (512 = project from 49k to 512, reduces overfitting)
         
         # Cross-validation config
         'n_folds': 5,
@@ -598,8 +612,27 @@ def main(config_overrides=None, wandb_run=None):
                 dropout=config['dropout'],
                 residual_alpha=0.7  # Strong residual to prevent attention overfitting
             ).to(device)
+        elif config['fusion_model_type'] == 'cross_transformer':
+            model = get_cross_transformer_fusion_model(
+                protein_dim=protein_dim,
+                mri_dim=mri_dim,
+                embed_dim=config.get('cross_transformer_embed_dim', 256),
+                num_heads=config.get('cross_transformer_num_heads', 4),
+                ff_dim=config.get('cross_transformer_ff_dim', None),  # Default: 4 * embed_dim
+                num_classes=2,
+                dropout=config.get('cross_transformer_dropout', 0.1)
+            ).to(device)
+        elif config['fusion_model_type'] == 'kronecker':
+            model = get_kronecker_product_fusion_model(
+                protein_dim=protein_dim,
+                mri_dim=mri_dim,
+                projected_dim=config.get('kronecker_projected_dim', None),  # None = no projection
+                hidden_dim=config['hidden_dim'],
+                num_classes=2,
+                dropout=config['dropout']
+            ).to(device)
         else:
-            raise ValueError(f"Unknown fusion_model_type: {config['fusion_model_type']}. Must be 'simple', 'weighted_attention', 'asymmetric', or 'cross_modal_attention'")
+            raise ValueError(f"Unknown fusion_model_type: {config['fusion_model_type']}. Must be 'simple', 'weighted_attention', 'asymmetric', 'cross_modal_attention', 'cross_transformer', or 'kronecker'")
         
         # Setup training with Focal Loss to handle class imbalance
         # Calculate class distribution for reporting
