@@ -32,3 +32,17 @@ uv add package-name
 ## 📊 Data Sources
 
 - **ADNI**: Alzheimer's Disease Neuroimaging Initiative
+
+## Multimodal Integration
+
+Intermediate fusion:
+- **Concatenation of vectors**
+- **Attention** based fusion
+- **Kronecker Product** fusion
+
+Late Fusion
+
+## Explainable AI
+
+
+
