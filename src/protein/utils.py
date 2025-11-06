@@ -18,6 +18,7 @@ from sklearn.metrics import (
     precision_score,
     recall_score,
     f1_score,
+    matthews_corrcoef,
 )
 from sklearn.preprocessing import StandardScaler
 
@@ -107,6 +108,7 @@ def evaluate_model_cv(clf, X_train_raw, y_train, X_test, y_test, cv_splitter, cl
     cv_precision_scores = []
     cv_recall_scores = []
     cv_f1_scores = []
+    cv_mcc_scores = []
 
     # Test metric accumulators (per fold, then averaged like CV)
     test_auc_scores = []
@@ -114,6 +116,7 @@ def evaluate_model_cv(clf, X_train_raw, y_train, X_test, y_test, cv_splitter, cl
     test_precision_scores = []
     test_recall_scores = []
     test_f1_scores = []
+    test_mcc_scores = []
     test_available = X_test is not None and y_test is not None
 
     for fold_idx, (train_idx, val_idx) in enumerate(cv_splitter.split(X_train_raw, y_train)):
@@ -141,11 +144,13 @@ def evaluate_model_cv(clf, X_train_raw, y_train, X_test, y_test, cv_splitter, cl
             cv_precision = precision_score(y_val_fold, val_pred, pos_label=1, zero_division=0)
             cv_recall = recall_score(y_val_fold, val_pred, pos_label=1, zero_division=0)
             cv_f1 = f1_score(y_val_fold, val_pred, pos_label=1, zero_division=0)
+            cv_mcc = matthews_corrcoef(y_val_fold, val_pred)
 
             cv_bal_acc_scores.append(cv_bal_acc)
             cv_precision_scores.append(cv_precision)
             cv_recall_scores.append(cv_recall)
             cv_f1_scores.append(cv_f1)
+            cv_mcc_scores.append(cv_mcc)
 
             # Compute AUC if probabilities available
             if hasattr(fold_clf, 'predict_proba'):
@@ -183,11 +188,13 @@ def evaluate_model_cv(clf, X_train_raw, y_train, X_test, y_test, cv_splitter, cl
                 test_precision = precision_score(y_test, test_pred, pos_label=1, zero_division=0)
                 test_recall = recall_score(y_test, test_pred, pos_label=1, zero_division=0)
                 test_f1 = f1_score(y_test, test_pred, pos_label=1, zero_division=0)
+                test_mcc = matthews_corrcoef(y_test, test_pred)
 
                 test_bal_acc_scores.append(test_bal_acc)
                 test_precision_scores.append(test_precision)
                 test_recall_scores.append(test_recall)
                 test_f1_scores.append(test_f1)
+                test_mcc_scores.append(test_mcc)
                 
                 if hasattr(fold_clf, 'predict_proba'):
                     test_proba = fold_clf.predict_proba(np.asarray(X_test_scaled))
@@ -222,12 +229,14 @@ def evaluate_model_cv(clf, X_train_raw, y_train, X_test, y_test, cv_splitter, cl
             cv_precision_scores.append(np.nan)
             cv_recall_scores.append(np.nan)
             cv_f1_scores.append(np.nan)
+            cv_mcc_scores.append(np.nan)
             if test_available:
                 test_auc_scores.append(np.nan)
                 test_bal_acc_scores.append(np.nan)
                 test_precision_scores.append(np.nan)
                 test_recall_scores.append(np.nan)
                 test_f1_scores.append(np.nan)
+                test_mcc_scores.append(np.nan)
 
     # Calculate statistics
     cv_auc_scores = np.array(cv_auc_scores)
@@ -235,6 +244,7 @@ def evaluate_model_cv(clf, X_train_raw, y_train, X_test, y_test, cv_splitter, cl
     cv_precision_scores = np.array(cv_precision_scores)
     cv_recall_scores = np.array(cv_recall_scores)
     cv_f1_scores = np.array(cv_f1_scores)
+    cv_mcc_scores = np.array(cv_mcc_scores)
     results = {
         'classifier': clf_name,
         'cv_auc_mean': np.nanmean(cv_auc_scores),
@@ -247,11 +257,14 @@ def evaluate_model_cv(clf, X_train_raw, y_train, X_test, y_test, cv_splitter, cl
         'cv_recall_std': np.nanstd(cv_recall_scores),
         'cv_f1_mean': np.nanmean(cv_f1_scores),
         'cv_f1_std': np.nanstd(cv_f1_scores),
+        'cv_mcc_mean': np.nanmean(cv_mcc_scores),
+        'cv_mcc_std': np.nanstd(cv_mcc_scores),
         'cv_auc_scores': cv_auc_scores.tolist(),
         'cv_bal_acc_scores': cv_bal_acc_scores.tolist(),
         'cv_precision_scores': cv_precision_scores.tolist(),
         'cv_recall_scores': cv_recall_scores.tolist(),
         'cv_f1_scores': cv_f1_scores.tolist(),
+        'cv_mcc_scores': cv_mcc_scores.tolist(),
     }
     if test_available:
         test_auc_scores = np.array(test_auc_scores)
@@ -259,6 +272,7 @@ def evaluate_model_cv(clf, X_train_raw, y_train, X_test, y_test, cv_splitter, cl
         test_precision_scores = np.array(test_precision_scores)
         test_recall_scores = np.array(test_recall_scores)
         test_f1_scores = np.array(test_f1_scores)
+        test_mcc_scores = np.array(test_mcc_scores)
         results.update({
             'test_auc_mean': np.nanmean(test_auc_scores),
             'test_auc_std': np.nanstd(test_auc_scores),
@@ -270,11 +284,14 @@ def evaluate_model_cv(clf, X_train_raw, y_train, X_test, y_test, cv_splitter, cl
             'test_recall_std': np.nanstd(test_recall_scores),
             'test_f1_mean': np.nanmean(test_f1_scores),
             'test_f1_std': np.nanstd(test_f1_scores),
+            'test_mcc_mean': np.nanmean(test_mcc_scores),
+            'test_mcc_std': np.nanstd(test_mcc_scores),
             'test_auc_scores': test_auc_scores.tolist(),
             'test_bal_acc_scores': test_bal_acc_scores.tolist(),
             'test_precision_scores': test_precision_scores.tolist(),
             'test_recall_scores': test_recall_scores.tolist(),
             'test_f1_scores': test_f1_scores.tolist(),
+            'test_mcc_scores': test_mcc_scores.tolist(),
         })
     return results
 
@@ -306,6 +323,7 @@ def print_results_summary(results_df, test_available=False):
     print(f"   Balanced Accuracy: {best_row.get('cv_bal_acc_mean', float('nan')):.3f}±{best_row.get('cv_bal_acc_std', float('nan')):.3f}")
     print(f"   AUC:               {best_row.get('cv_auc_mean', float('nan')):.3f}±{best_row.get('cv_auc_std', float('nan')):.3f}")
     print(f"   F1:                {best_row.get('cv_f1_mean', float('nan')):.3f}±{best_row.get('cv_f1_std', float('nan')):.3f}")
+    print(f"   MCC:               {best_row.get('cv_mcc_mean', float('nan')):.3f}±{best_row.get('cv_mcc_std', float('nan')):.3f}")
     print(f"   Precision:         {best_row.get('cv_precision_mean', float('nan')):.3f}±{best_row.get('cv_precision_std', float('nan')):.3f}")
     print(f"   Recall:            {best_row.get('cv_recall_mean', float('nan')):.3f}±{best_row.get('cv_recall_std', float('nan')):.3f}")
 
@@ -317,9 +335,10 @@ def print_results_summary(results_df, test_available=False):
             test_auc_str = f"AUC {row['test_auc_mean']:.3f}±{row['test_auc_std']:.3f}" if not np.isnan(row['test_auc_mean']) else "AUC NaN±NaN"
             bal_acc_str = f"BalAcc {row.get('test_bal_acc_mean', float('nan')):.3f}±{row.get('test_bal_acc_std', float('nan')):.3f}"
             f1_str = f"F1 {row.get('test_f1_mean', float('nan')):.3f}±{row.get('test_f1_std', float('nan')):.3f}"
+            mcc_str = f"MCC {row.get('test_mcc_mean', float('nan')):.3f}±{row.get('test_mcc_std', float('nan')):.3f}"
             prec_str = f"Prec {row.get('test_precision_mean', float('nan')):.3f}±{row.get('test_precision_std', float('nan')):.3f}"
             rec_str = f"Rec {row.get('test_recall_mean', float('nan')):.3f}±{row.get('test_recall_std', float('nan')):.3f}"
-            print(f"   {idx}. {row['classifier']:<20}: {bal_acc_str} | {test_auc_str} | {f1_str} | {prec_str} | {rec_str}")
+            print(f"   {idx}. {row['classifier']:<20}: {bal_acc_str} | {test_auc_str} | {f1_str} | {mcc_str} | {prec_str} | {rec_str}")
     
     # Best model details
     best_model = results_sorted.iloc[0]
@@ -327,12 +346,14 @@ def print_results_summary(results_df, test_available=False):
     print(f"   CV AUC: {best_model['cv_auc_mean']:.3f} ± {best_model['cv_auc_std']:.3f}")
     print(f"   CV Balanced Accuracy: {best_model.get('cv_bal_acc_mean', float('nan')):.3f} ± {best_model.get('cv_bal_acc_std', float('nan')):.3f}")
     print(f"   CV F1: {best_model.get('cv_f1_mean', float('nan')):.3f} ± {best_model.get('cv_f1_std', float('nan')):.3f}")
+    print(f"   CV MCC: {best_model.get('cv_mcc_mean', float('nan')):.3f} ± {best_model.get('cv_mcc_std', float('nan')):.3f}")
     print(f"   CV Precision: {best_model.get('cv_precision_mean', float('nan')):.3f} ± {best_model.get('cv_precision_std', float('nan')):.3f}")
     print(f"   CV Recall: {best_model.get('cv_recall_mean', float('nan')):.3f} ± {best_model.get('cv_recall_std', float('nan')):.3f}")
     if test_available and 'test_auc_mean' in best_model:
         print(f"   Test AUC: {best_model['test_auc_mean']:.3f} ± {best_model['test_auc_std']:.3f}")
         print(f"   Test Balanced Accuracy: {best_model.get('test_bal_acc_mean', float('nan')):.3f} ± {best_model.get('test_bal_acc_std', float('nan')):.3f}")
         print(f"   Test F1: {best_model.get('test_f1_mean', float('nan')):.3f} ± {best_model.get('test_f1_std', float('nan')):.3f}")
+        print(f"   Test MCC: {best_model.get('test_mcc_mean', float('nan')):.3f} ± {best_model.get('test_mcc_std', float('nan')):.3f}")
         print(f"   Test Precision: {best_model.get('test_precision_mean', float('nan')):.3f} ± {best_model.get('test_precision_std', float('nan')):.3f}")
         print(f"   Test Recall: {best_model.get('test_recall_mean', float('nan')):.3f} ± {best_model.get('test_recall_std', float('nan')):.3f}")
 
@@ -474,6 +495,7 @@ def save_all_models(classifiers, results_df, X_train_raw, y_train, X_test, y_tes
                 test_metrics['test_precision'] = float(precision_score(y_test, test_pred, pos_label=1, zero_division=0))
                 test_metrics['test_recall'] = float(recall_score(y_test, test_pred, pos_label=1, zero_division=0))
                 test_metrics['test_f1'] = float(f1_score(y_test, test_pred, pos_label=1, zero_division=0))
+                test_metrics['test_mcc'] = float(matthews_corrcoef(y_test, test_pred))
                 
                 if hasattr(final_clf, 'predict_proba'):
                     test_proba = final_clf.predict_proba(np.asarray(X_test_scaled))
@@ -499,6 +521,7 @@ def save_all_models(classifiers, results_df, X_train_raw, y_train, X_test, y_tes
                 print(f"      Test AUC: {test_metrics.get('test_auc', 'N/A'):.3f}" if 'test_auc' in test_metrics else "      Test AUC: N/A")
                 print(f"      Test Balanced Accuracy: {test_metrics['test_balanced_accuracy']:.3f}")
                 print(f"      Test F1: {test_metrics['test_f1']:.3f}")
+                print(f"      Test MCC: {test_metrics['test_mcc']:.3f}")
                 print(f"      Test Precision: {test_metrics['test_precision']:.3f}")
                 print(f"      Test Recall: {test_metrics['test_recall']:.3f}")
                 

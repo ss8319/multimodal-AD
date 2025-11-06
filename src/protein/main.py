@@ -93,11 +93,13 @@ def main(args):
             print(f"     CV-AUC: {result['cv_auc_mean']:.3f} ± {result['cv_auc_std']:.3f}")
             print(f"     CV-BalAcc: {result.get('cv_bal_acc_mean', float('nan')):.3f} ± {result.get('cv_bal_acc_std', float('nan')):.3f}")
             print(f"     CV-F1: {result.get('cv_f1_mean', float('nan')):.3f} ± {result.get('cv_f1_std', float('nan')):.3f}")
+            print(f"     CV-MCC: {result.get('cv_mcc_mean', float('nan')):.3f} ± {result.get('cv_mcc_std', float('nan')):.3f}")
             
             if test_available:
                 print(f"     Test-AUC: {result['test_auc_mean']:.3f} ± {result['test_auc_std']:.3f}")
                 print(f"     Test-BalAcc: {result.get('test_bal_acc_mean', float('nan')):.3f} ± {result.get('test_bal_acc_std', float('nan')):.3f}")
                 print(f"     Test-F1: {result.get('test_f1_mean', float('nan')):.3f} ± {result.get('test_f1_std', float('nan')):.3f}")
+                print(f"     Test-MCC: {result.get('test_mcc_mean', float('nan')):.3f} ± {result.get('test_mcc_std', float('nan')):.3f}")
 
         except Exception as e:
             print(f"     Error: {str(e)[:50]}...")
