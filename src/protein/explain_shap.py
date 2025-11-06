@@ -1,6 +1,20 @@
 """
 SHAP explanations for protein classification models
 Simple vanilla SHAP implementation for Logistic Regression and Neural Network
+
+This module follows SHAP's official API as documented at:
+- https://github.com/slundberg/shap
+- SHAP version: 0.49.1
+
+Key API patterns used:
+1. LinearExplainer: shap.LinearExplainer(model, background_data)
+   - shap_values() returns: list[np.ndarray] for binary classification
+   
+2. DeepExplainer: shap.DeepExplainer(pytorch_model, background_tensor)
+   - shap_values() returns: np.ndarray shape (n_samples, n_features, n_classes) for binary classification
+   
+3. KernelExplainer: shap.KernelExplainer(predict_fn, background_data)
+   - shap_values() returns: np.ndarray shape (n_samples, n_features)
 """
 import numpy as np
 import pandas as pd
@@ -143,21 +157,35 @@ def create_prediction_function(model, class_idx=1):
 
 
 def explain_logistic_regression(model, background, explained, feature_names, output_dir):
-    """Generate SHAP explanations for Logistic Regression using LinearExplainer"""
+    """
+    Generate SHAP explanations for Logistic Regression using SHAP's LinearExplainer
+    
+    SHAP API Reference:
+        - LinearExplainer: https://github.com/slundberg/shap
+        - shap_values() returns numpy.ndarray of shape (n_samples, n_features) for binary classification
+    """
     print("\n" + "="*60)
     print("SHAP EXPLANATIONS: Logistic Regression")
     print("="*60)
     
-    # Use LinearExplainer for logistic regression (fast and exact)
+    # Initialize explainer per SHAP API: LinearExplainer(model, data)
     explainer = shap.LinearExplainer(model, background)
     
-    # Compute SHAP values
+    # Compute SHAP values per SHAP API: explainer.shap_values(X)
+    # SHAP API: For binary classification, returns list [shap_class_0, shap_class_1]
     print(f"Computing SHAP values for {len(explained)} samples...")
-    shap_values = explainer.shap_values(explained)
+    shap_values_raw = explainer.shap_values(explained)
     
-    # For binary classification, shap_values might be a list with one element per class
-    if isinstance(shap_values, list):
-        shap_values = shap_values[1]  # Use class 1 (AD)
+    # SHAP API return format for LinearExplainer with binary classification:
+    # Returns list of numpy arrays [class_0_SHAP, class_1_SHAP]
+    # Each array has shape (n_samples, n_features)
+    if isinstance(shap_values_raw, list):
+        if len(shap_values_raw) != 2:
+            raise ValueError(f"Expected 2 classes for binary classification, got {len(shap_values_raw)}")
+        shap_values = shap_values_raw[1]  # Use class 1 (AD) - second element
+    else:
+        # Regression or unexpected format
+        shap_values = np.asarray(shap_values_raw)
     
     # Create plots
     plot_dir = Path(output_dir) / "shap" / "logistic_regression"
@@ -209,22 +237,134 @@ def explain_logistic_regression(model, background, explained, feature_names, out
     return shap_values
 
 
-def explain_neural_network(model, background, explained, feature_names, output_dir):
-    """Generate SHAP explanations for Neural Network using KernelExplainer"""
+def explain_neural_network(model, background, explained, feature_names, output_dir, use_deep=True):
+    """
+    Generate SHAP explanations for Neural Network using SHAP's official API
+    
+    Args:
+        model: NeuralNetworkClassifier instance
+        background: Background samples (full training set recommended)
+        explained: Samples to explain (full test set recommended)
+        feature_names: List of feature names
+        output_dir: Directory to save outputs
+        use_deep: If True, use DeepExplainer (recommended), else use KernelExplainer
+    
+    SHAP API Reference:
+        - DeepExplainer: https://github.com/slundberg/shap
+        - shap_values() returns:
+          * For binary classification: numpy.ndarray of shape (n_samples, n_features, n_classes)
+          * For multi-class: list of numpy arrays, one per class
+          * For regression: numpy.ndarray of shape (n_samples, n_features)
+    """
     print("\n" + "="*60)
     print("SHAP EXPLANATIONS: Neural Network")
     print("="*60)
     
-    # Create prediction function for class 1 (AD)
-    predict_fn = create_prediction_function(model, class_idx=1)
+    if use_deep:
+        # Use DeepExplainer (recommended for neural networks)
+        print("   Using DeepExplainer (recommended for neural networks)...")
+        print("   This is faster and more accurate than KernelExplainer")
+        
+        # Get the PyTorch model (not the wrapper)
+        if not hasattr(model, 'model') or not isinstance(model.model, torch.nn.Module):
+            raise ValueError("Model must have a PyTorch .model attribute for DeepExplainer")
+        
+        pytorch_model = model.model
+        pytorch_model.eval()  # Ensure model is in eval mode
+        
+        # Convert background and explained to tensors
+        # Use full sets for consistency with other methods
+        # SHAP API: DeepExplainer(model, background_data) where background_data is torch.Tensor or numpy array
+        background_tensor = torch.FloatTensor(background)
+        explained_tensor = torch.FloatTensor(explained)
+        
+        print(f"   Background: {len(background)} samples (full training set)")
+        print(f"   Explained: {len(explained)} samples (full test set)")
+        
+        # Initialize explainer per SHAP API: DeepExplainer(model, background_data)
+        explainer = shap.DeepExplainer(pytorch_model, background_tensor)
+        
+        # Compute SHAP values per SHAP API: explainer.shap_values(X, ranked_outputs=None, ...)
+        # API doc: https://github.com/slundberg/shap
+        print(f"   Computing SHAP values for {len(explained)} samples...")
+        shap_values_raw = explainer.shap_values(explained_tensor, check_additivity=True)
+        
+        # SHAP API return format (from SHAP 0.49.1 documentation and source):
+        # - For binary classification with 2 output classes: 
+        #   Returns numpy.ndarray of shape (n_samples, n_features, n_classes) = (23, 320, 2)
+        # - For multi-class (>2 classes):
+        #   Returns list of numpy arrays, one per class
+        # - For regression (single output):
+        #   Returns numpy.ndarray of shape (n_samples, n_features)
+        
+        # Convert to numpy array if needed (SHAP may return tensors)
+        if isinstance(shap_values_raw, torch.Tensor):
+            shap_values_raw = shap_values_raw.cpu().numpy()
+        elif not isinstance(shap_values_raw, np.ndarray) and not isinstance(shap_values_raw, list):
+            shap_values_raw = np.asarray(shap_values_raw)
+        
+        # Handle SHAP API return formats according to official behavior
+        if isinstance(shap_values_raw, list):
+            # Multi-class format (>2 classes): list of arrays
+            # Each element is shape (n_samples, n_features)
+            if len(shap_values_raw) != 2:
+                raise ValueError(f"Expected 2 classes for binary classification, got {len(shap_values_raw)}")
+            shap_values = shap_values_raw[1]  # Class 1 (AD) - second element
+        elif isinstance(shap_values_raw, np.ndarray):
+            if shap_values_raw.ndim == 3:
+                # Binary classification: shape (n_samples, n_features, n_classes)
+                # Extract class 1 (AD) - last dimension index 1
+                if shap_values_raw.shape[2] != 2:
+                    raise ValueError(f"Expected 2 classes, got shape {shap_values_raw.shape}")
+                shap_values = shap_values_raw[:, :, 1]  # Class 1 (AD)
+            elif shap_values_raw.ndim == 2:
+                # Regression or single output: shape (n_samples, n_features)
+                shap_values = shap_values_raw
+            else:
+                raise ValueError(f"Unexpected SHAP values ndim: {shap_values_raw.ndim}, shape: {shap_values_raw.shape}")
+        else:
+            raise TypeError(f"SHAP returned unexpected type: {type(shap_values_raw)}")
+        
+        # Verify output shape matches expected format per SHAP API
+        expected_shape = (explained.shape[0], explained.shape[1])
+        if shap_values.shape != expected_shape:
+            raise ValueError(
+                f"SHAP values shape mismatch. Got {shap_values.shape}, expected {expected_shape}. "
+                f"This may indicate an issue with SHAP API usage or model output format."
+            )
+        
+        print(f"   SHAP values shape: {shap_values.shape} ✓ (per SHAP API: {explained.shape[0]} samples × {explained.shape[1]} features)")
+        print("   ✓ DeepExplainer completed successfully")
+        
+    else:
+        # Use KernelExplainer (model-agnostic fallback)
+        # SHAP API: KernelExplainer(model.predict_fn, background_data)
+        print("   Using KernelExplainer (model-agnostic)...")
+        
+        # Create prediction function for class 1 (AD)
+        # SHAP API requires: predict_fn(X) -> array of predictions
+        predict_fn = create_prediction_function(model, class_idx=1)
+        
+        # Use full background set for consistency
+        print(f"   Background: {len(background)} samples (full training set)")
+        print(f"   Explained: {len(explained)} samples (full test set)")
+        
+        # Initialize explainer per SHAP API: KernelExplainer(model_fn, data)
+        explainer = shap.KernelExplainer(predict_fn, background)
+        
+        # Compute SHAP values per SHAP API: explainer.shap_values(X, nsamples=100)
+        # API doc: Returns numpy.ndarray of shape (n_samples, n_features)
+        print(f"   Computing SHAP values for {len(explained)} samples...")
+        print("   (This may take longer than DeepExplainer)")
+        shap_values = explainer.shap_values(explained, nsamples=200)
+        
+        # KernelExplainer always returns numpy.ndarray of shape (n_samples, n_features)
+        # No need to handle different formats
+        shap_values = np.asarray(shap_values)
     
-    # Use KernelExplainer (model-agnostic, works with any model)
-    print("   Initializing KernelExplainer (this may take a moment)...")
-    explainer = shap.KernelExplainer(predict_fn, background)
-    
-    # Compute SHAP values (use a subset if too slow)
-    print(f"   Computing SHAP values for {len(explained)} samples...")
-    shap_values = explainer.shap_values(explained, nsamples=100)  # nsamples controls speed/accuracy tradeoff
+    # Ensure shap_values is numpy array
+    if isinstance(shap_values, torch.Tensor):
+        shap_values = shap_values.cpu().numpy()
     
     # Create plots
     plot_dir = Path(output_dir) / "shap" / "neural_network"
@@ -300,6 +440,8 @@ def main():
                        help="Number of samples to explain (default: use full test set, use -1 for all)")
     parser.add_argument("--random-state", type=int, default=42,
                        help="Random seed for sampling")
+    parser.add_argument("--nn-explainer", type=str, default="deep", choices=["deep", "kernel"],
+                       help="SHAP explainer for Neural Network: 'deep' (recommended, faster) or 'kernel' (slower but model-agnostic)")
     
     args = parser.parse_args()
     
@@ -400,7 +542,9 @@ def main():
     
     if nn_model is not None:
         try:
-            explain_neural_network(nn_model, background, explained, feature_names, run_dir)
+            use_deep = args.nn_explainer == "deep"
+            explain_neural_network(nn_model, background, explained, feature_names, run_dir, 
+                                  use_deep=use_deep)
         except Exception as e:
             print(f"   ✗ Error explaining Neural Network: {e}")
             import traceback
