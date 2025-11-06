@@ -19,6 +19,22 @@ except ImportError:
     from dataset import ProteinDataset
 
 
+def get_device():
+    """
+    Detect available device (GPU/CPU) for SLURM environments
+    
+    Returns:
+        torch.device: GPU if available (cuda:0), else CPU
+    """
+    if torch.cuda.is_available():
+        device = torch.device("cuda:0")
+        print(f"   Using GPU: {torch.cuda.get_device_name(0)}")
+        return device
+    else:
+        print("   CUDA not available, using CPU")
+        return torch.device("cpu")
+
+
 class EarlyStopping:
     """Lightweight early stopping utility."""
 
@@ -732,7 +748,7 @@ class CustomTransformerClassifier(BaseEstimator, ClassifierMixin):
     
     def __init__(self, d_model=32, n_heads=2, n_blocks=2, ffn_dim=64, 
                  dropout=0.1, lr=0.001, epochs=100, batch_size=32, 
-                 patience=10, random_state=42):
+                 patience=10, device=None, random_state=42):
         self.d_model = d_model
         self.n_heads = n_heads
         self.n_blocks = n_blocks
@@ -741,7 +757,8 @@ class CustomTransformerClassifier(BaseEstimator, ClassifierMixin):
         self.lr = lr
         self.epochs = epochs
         self.batch_size = batch_size
-        self.patience = patience
+        self.patience = patience  # Early stopping patience
+        self.device = device if device is not None else get_device()
         self.random_state = random_state
     
     def fit(self, X, y):
@@ -762,7 +779,7 @@ class CustomTransformerClassifier(BaseEstimator, ClassifierMixin):
             n_blocks=self.n_blocks,
             ffn_dim=self.ffn_dim,
             dropout=self.dropout
-        )
+        ).to(self.device)
         
         # Split for validation
         if len(X) > 10:
@@ -776,8 +793,12 @@ class CustomTransformerClassifier(BaseEstimator, ClassifierMixin):
         train_dataset = ProteinDataset(X_tr, y_tr)
         val_dataset = ProteinDataset(X_val, y_val)
         
-        train_loader = DataLoader(train_dataset, batch_size=self.batch_size, shuffle=True)
-        val_loader = DataLoader(val_dataset, batch_size=self.batch_size, shuffle=False)
+        # Pin memory for faster GPU transfer
+        pin_memory = self.device.type == 'cuda'
+        train_loader = DataLoader(train_dataset, batch_size=self.batch_size, 
+                                 shuffle=True, pin_memory=pin_memory)
+        val_loader = DataLoader(val_dataset, batch_size=self.batch_size, 
+                               shuffle=False, pin_memory=pin_memory)
         
         # Optimizer and loss
         optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr, weight_decay=1e-5)
@@ -803,6 +824,10 @@ class CustomTransformerClassifier(BaseEstimator, ClassifierMixin):
             self.model.train()
             train_loss = 0
             for batch_X, batch_y in train_loader:
+                # Move batch to device (GPU or CPU)
+                batch_X = batch_X.to(self.device)
+                batch_y = batch_y.to(self.device)
+                
                 optimizer.zero_grad()
                 logits = self.model(batch_X)
                 loss = criterion(logits, batch_y)
@@ -821,6 +846,10 @@ class CustomTransformerClassifier(BaseEstimator, ClassifierMixin):
             val_loss = 0
             with torch.no_grad():
                 for batch_X, batch_y in val_loader:
+                    # Move batch to device
+                    batch_X = batch_X.to(self.device)
+                    batch_y = batch_y.to(self.device)
+                    
                     logits = self.model(batch_X)
                     loss = criterion(logits, batch_y)
                     val_loss += loss.item()
@@ -837,10 +866,12 @@ class CustomTransformerClassifier(BaseEstimator, ClassifierMixin):
         try:
             self.model.eval()
             with torch.no_grad():
-                X_tensor = torch.FloatTensor(X)
+                # Move input to device
+                X_tensor = torch.FloatTensor(X).to(self.device)
                 logits = self.model(X_tensor)
                 probas = F.softmax(logits, dim=1)
-                probas_np = probas.numpy()
+                # Move back to CPU for sklearn compatibility
+                probas_np = probas.cpu().numpy()
                 
                 if np.isnan(probas_np).any() or np.isinf(probas_np).any():
                     print(f"Warning: Invalid probabilities detected, using fallback")
@@ -993,27 +1024,31 @@ def get_classifiers(random_state=42, nn_patience=20, transformer_patience=10):
     """
     classifiers = {
         'Logistic Regression': LogisticRegression(random_state=random_state, max_iter=1000),
-        'Random Forest': RandomForestClassifier(n_estimators=100, random_state=random_state),
-        'SVM (RBF)': SVC(probability=True, random_state=random_state),
-        'Gradient Boosting': GradientBoostingClassifier(random_state=random_state),
-        'XGBoost': XGBClassifier(
-            random_state=random_state,
-            eval_metric='logloss',  # For binary classification
-            n_estimators=100,
-            max_depth=6,
-            learning_rate=0.1,
-            subsample=0.8,
-            colsample_bytree=0.9
-        ),
+        # 'Random Forest': RandomForestClassifier(n_estimators=100, random_state=random_state),
+        # 'SVM (RBF)': SVC(probability=True, random_state=random_state),
+        # 'Gradient Boosting': GradientBoostingClassifier(random_state=random_state),
+        # 'XGBoost': XGBClassifier(
+        #     random_state=random_state,
+        #     eval_metric='logloss',  # For binary classification
+        #     n_estimators=100,
+        #     max_depth=6,
+        #     learning_rate=0.1,
+        #     subsample=0.8,
+        #     colsample_bytree=0.9
+        # ),
         'Neural Network': NeuralNetworkClassifier(hidden_sizes=(128, 64), dropout=0.2, lr=1e-3, epochs=200, batch_size=32, patience=nn_patience, random_state=random_state),
-    #     'Protein Transformer': ProteinTransformerClassifier(
-    #         d_model=32, n_heads=4, n_layers=2, dropout=0.3,
-    #         lr=0.001, epochs=100, batch_size=16, patience=transformer_patience, random_state=random_state
-    #     ),
-    #     'Protein Attention Pooling': ProteinAttentionPoolingClassifier(
-    #         d_model=32, dropout=0.2,
-    #         lr=0.001, epochs=200, batch_size=8, patience=20, random_state=random_state
-    #     )
-        'Custom Transformer': CustomTransformerClassifier()
+        'Protein Transformer': ProteinTransformerClassifier(
+            d_model=32, n_heads=4, n_layers=2, dropout=0.3,
+            lr=0.001, epochs=100, batch_size=32, patience=transformer_patience, random_state=random_state
+        ),
+        'Protein Attention Pooling': ProteinAttentionPoolingClassifier(
+            d_model=32, dropout=0.3,
+            lr=0.001, epochs=200, batch_size=32, patience=20, random_state=random_state
+        ),
+        'Custom Transformer': CustomTransformerClassifier(
+            d_model=32, n_heads=2, n_blocks=2, ffn_dim=64,
+            dropout=0.3, lr=0.001, epochs=100, batch_size=32,
+            patience=transformer_patience, random_state=random_state
+        )
     }
     return classifiers
