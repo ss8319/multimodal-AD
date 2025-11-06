@@ -44,5 +44,9 @@ Late Fusion
 
 ## Explainable AI
 
+- Pertubation-based: **SHAP**
+- Gradient-based: **Integrated Gradients** and **Attention weights** 
+- Activation-based: **Layer-wise Relevance Propagation (LRP)**
+
 
 
