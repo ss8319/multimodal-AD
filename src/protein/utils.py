@@ -309,13 +309,13 @@ def print_results_summary(results_df, test_available=False):
         print("   No successful results")
         return
 
-    # Sort by CV AUC
-    results_sorted = results_df.fillna({'cv_auc_mean': 0}).sort_values('cv_auc_mean', ascending=False)
+    # Sort by CV MCC (Matthews Correlation Coefficient)
+    results_sorted = results_df.fillna({'cv_mcc_mean': -1}).sort_values('cv_mcc_mean', ascending=False)
     
-    print("\nRanking by CV AUC (Mean ± Std):")
+    print("\nRanking by CV MCC (Mean ± Std):")
     for idx, (_, row) in enumerate(results_sorted.iterrows(), 1):
-        cv_auc_str = f"{row['cv_auc_mean']:.3f}±{row['cv_auc_std']:.3f}" if not np.isnan(row['cv_auc_mean']) else "NaN±NaN"
-        print(f"   {idx}. {row['classifier']:<20}: {cv_auc_str}")
+        cv_mcc_str = f"{row['cv_mcc_mean']:.3f}±{row['cv_mcc_std']:.3f}" if not np.isnan(row['cv_mcc_mean']) else "NaN±NaN"
+        print(f"   {idx}. {row['classifier']:<20}: {cv_mcc_str}")
     
     # Show key CV metrics per best model row (high-level)
     best_row = results_sorted.iloc[0]
@@ -329,8 +329,8 @@ def print_results_summary(results_df, test_available=False):
 
     # Show test results if available
     if test_available and 'test_auc_mean' in results_df.columns:
-        print(f"\nTest Set Performance:")
-        test_sorted = results_df.fillna({'test_auc_mean': 0}).sort_values('test_auc_mean', ascending=False)
+        print(f"\nTest Set Performance (Ranked by Test MCC):")
+        test_sorted = results_df.fillna({'test_mcc_mean': -1}).sort_values('test_mcc_mean', ascending=False)
         for idx, (_, row) in enumerate(test_sorted.iterrows(), 1):
             test_auc_str = f"AUC {row['test_auc_mean']:.3f}±{row['test_auc_std']:.3f}" if not np.isnan(row['test_auc_mean']) else "AUC NaN±NaN"
             bal_acc_str = f"BalAcc {row.get('test_bal_acc_mean', float('nan')):.3f}±{row.get('test_bal_acc_std', float('nan')):.3f}"
