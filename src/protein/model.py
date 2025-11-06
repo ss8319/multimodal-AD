@@ -280,7 +280,7 @@ class ProteinTransformerClassifier(BaseEstimator, ClassifierMixin):
         
         self.model.apply(init_weights)
         
-        early_stopper = EarlyStopping(patience=self.patience, min_delta=1e-3, mode="min", verbose=False)
+        early_stopper = EarlyStopping(patience=self.patience, min_delta=1e-3, mode="min", verbose=True)
         
         for epoch in range(1, self.epochs + 1):
             # Training
@@ -316,7 +316,12 @@ class ProteinTransformerClassifier(BaseEstimator, ClassifierMixin):
             val_loss /= len(val_loader) if len(val_loader) > 0 else 1
             
             if early_stopper.step(val_loss, model=self.model, epoch=epoch):
-                    break
+                print(f"   Early stopping triggered at epoch {epoch}/{self.epochs} (best epoch: {early_stopper.best_epoch}, best val_loss: {early_stopper.best_score:.4f})")
+                break
+        
+        # Log completion status
+        if epoch == self.epochs:
+            print(f"   Training completed: reached max epochs {self.epochs} (best epoch: {early_stopper.best_epoch}, best val_loss: {early_stopper.best_score:.4f})")
         
         early_stopper.restore_best(self.model)
         return self
@@ -442,7 +447,7 @@ class ProteinAttentionPoolingClassifier(BaseEstimator, ClassifierMixin):
             class_priors = counts / counts.sum()
             self.model.classifier[-1].bias.data = torch.log(torch.FloatTensor(class_priors))
         
-        early_stopper = EarlyStopping(patience=self.patience, min_delta=1e-3, mode="min", verbose=False)
+        early_stopper = EarlyStopping(patience=self.patience, min_delta=1e-3, mode="min", verbose=True)
         
         for epoch in range(1, self.epochs + 1):
             # Training
@@ -474,7 +479,12 @@ class ProteinAttentionPoolingClassifier(BaseEstimator, ClassifierMixin):
             val_loss /= len(val_loader) if len(val_loader) > 0 else 1
             
             if early_stopper.step(val_loss, model=self.model, epoch=epoch):
+                print(f"   Early stopping triggered at epoch {epoch}/{self.epochs} (best epoch: {early_stopper.best_epoch}, best val_loss: {early_stopper.best_score:.4f})")
                 break
+        
+        # Log completion status
+        if epoch == self.epochs:
+            print(f"   Training completed: reached max epochs {self.epochs} (best epoch: {early_stopper.best_epoch}, best val_loss: {early_stopper.best_score:.4f})")
         
         early_stopper.restore_best(self.model)
         return self
@@ -817,7 +827,7 @@ class CustomTransformerClassifier(BaseEstimator, ClassifierMixin):
         
         self.model.apply(init_weights)
         
-        early_stopper = EarlyStopping(patience=self.patience, min_delta=1e-3, mode="min", verbose=False)
+        early_stopper = EarlyStopping(patience=self.patience, min_delta=1e-3, mode="min", verbose=True)
         
         for epoch in range(1, self.epochs + 1):
             # Training
@@ -857,7 +867,12 @@ class CustomTransformerClassifier(BaseEstimator, ClassifierMixin):
             val_loss /= len(val_loader) if len(val_loader) > 0 else 1
             
             if early_stopper.step(val_loss, model=self.model, epoch=epoch):
+                print(f"   Early stopping triggered at epoch {epoch}/{self.epochs} (best epoch: {early_stopper.best_epoch}, best val_loss: {early_stopper.best_score:.4f})")
                 break
+        
+        # Log completion status
+        if epoch == self.epochs:
+            print(f"   Training completed: reached max epochs {self.epochs} (best epoch: {early_stopper.best_epoch}, best val_loss: {early_stopper.best_score:.4f})")
         
         early_stopper.restore_best(self.model)
         return self
@@ -951,7 +966,7 @@ class NeuralNetworkClassifier(BaseEstimator, ClassifierMixin):
 
         self.model.apply(init_weights)
 
-        early_stopper = EarlyStopping(patience=self.patience, min_delta=1e-3, mode="min", verbose=False)
+        early_stopper = EarlyStopping(patience=self.patience, min_delta=1e-3, mode="min", verbose=True)
 
         for epoch in range(1, self.epochs + 1):
             self.model.train()
@@ -976,7 +991,12 @@ class NeuralNetworkClassifier(BaseEstimator, ClassifierMixin):
             val_loss /= max(1, len(val_loader))
 
             if early_stopper.step(val_loss, model=self.model, epoch=epoch):
+                print(f"   Early stopping triggered at epoch {epoch}/{self.epochs} (best epoch: {early_stopper.best_epoch}, best val_loss: {early_stopper.best_score:.4f})")
                 break
+        
+        # Log completion status
+        if epoch == self.epochs:
+            print(f"   Training completed: reached max epochs {self.epochs} (best epoch: {early_stopper.best_epoch}, best val_loss: {early_stopper.best_score:.4f})")
 
         early_stopper.restore_best(self.model)
         return self
@@ -1024,30 +1044,30 @@ def get_classifiers(random_state=42, nn_patience=20, transformer_patience=10):
     """
     classifiers = {
         'Logistic Regression': LogisticRegression(random_state=random_state, max_iter=1000),
-        # 'Random Forest': RandomForestClassifier(n_estimators=100, random_state=random_state),
-        # 'SVM (RBF)': SVC(probability=True, random_state=random_state),
-        # 'Gradient Boosting': GradientBoostingClassifier(random_state=random_state),
-        # 'XGBoost': XGBClassifier(
-        #     random_state=random_state,
-        #     eval_metric='logloss',  # For binary classification
-        #     n_estimators=100,
-        #     max_depth=6,
-        #     learning_rate=0.1,
-        #     subsample=0.8,
-        #     colsample_bytree=0.9
+        'Random Forest': RandomForestClassifier(n_estimators=100, random_state=random_state),
+        'SVM (RBF)': SVC(probability=True, random_state=random_state),
+        'Gradient Boosting': GradientBoostingClassifier(random_state=random_state),
+        'XGBoost': XGBClassifier(
+            random_state=random_state,
+            eval_metric='logloss',  # For binary classification
+            n_estimators=100,
+            max_depth=6,
+            learning_rate=0.1,
+            subsample=0.8,
+            colsample_bytree=0.9
+        ),
+        'Neural Network': NeuralNetworkClassifier(hidden_sizes=(512, 256, 128, 64), dropout=0.1, lr=1e-2, epochs=200, batch_size=32, patience=nn_patience, random_state=random_state),
+        # 'Protein Transformer': ProteinTransformerClassifier(
+        #     d_model=32, n_heads=4, n_layers=2, dropout=0.3,
+        #     lr=0.001, epochs=100, batch_size=32, patience=transformer_patience, random_state=random_state
         # ),
-        'Neural Network': NeuralNetworkClassifier(hidden_sizes=(128, 64), dropout=0.2, lr=1e-3, epochs=200, batch_size=32, patience=nn_patience, random_state=random_state),
-        'Protein Transformer': ProteinTransformerClassifier(
-            d_model=32, n_heads=4, n_layers=2, dropout=0.3,
-            lr=0.001, epochs=100, batch_size=32, patience=transformer_patience, random_state=random_state
-        ),
-        'Protein Attention Pooling': ProteinAttentionPoolingClassifier(
-            d_model=32, dropout=0.3,
-            lr=0.001, epochs=200, batch_size=32, patience=20, random_state=random_state
-        ),
+        # 'Protein Attention Pooling': ProteinAttentionPoolingClassifier(
+        #     d_model=32, dropout=0.3,
+        #     lr=0.001, epochs=200, batch_size=32, patience=20, random_state=random_state
+        # ),
         'Custom Transformer': CustomTransformerClassifier(
             d_model=32, n_heads=2, n_blocks=2, ffn_dim=64,
-            dropout=0.3, lr=0.001, epochs=100, batch_size=32,
+            dropout=0.10, lr=0.001, epochs=200, batch_size=32,
             patience=transformer_patience, random_state=random_state
         )
     }
