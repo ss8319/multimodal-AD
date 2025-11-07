@@ -412,7 +412,34 @@ def extract_model_config(pytorch_model, wrapper_model=None):
     
     # Save class information for dynamic loading (REQUIRED)
     config['model_class'] = pytorch_model.__class__.__name__
-    config['model_module'] = pytorch_model.__class__.__module__
+    
+    # Normalize module path to always use full path for reliable imports
+    # This handles cases where models are imported as 'from model import NeuralNetwork'
+    # vs 'from src.protein.model import NeuralNetwork'
+    raw_module = pytorch_model.__class__.__module__
+    
+    # Map common short module names to full paths
+    module_normalization_map = {
+        'model': 'src.protein.model',
+        'src.protein.model': 'src.protein.model',  # Already correct
+    }
+    
+    # Normalize module path
+    if raw_module in module_normalization_map:
+        config['model_module'] = module_normalization_map[raw_module]
+    elif raw_module.startswith('src.protein.'):
+        # Already has full path prefix
+        config['model_module'] = raw_module
+    else:
+        # Try to infer full path from class name and known protein models
+        protein_model_classes = ['NeuralNetwork', 'ProteinTransformer', 'ProteinAttentionPooling', 
+                                'CustomTransformerEncoder', 'AttentionBlock']
+        if config['model_class'] in protein_model_classes:
+            # Assume it's a protein model and use full path
+            config['model_module'] = 'src.protein.model'
+        else:
+            # Unknown model, use as-is (might be from another module)
+            config['model_module'] = raw_module
     
     # Get constructor signature to know what parameters to extract
     try:
