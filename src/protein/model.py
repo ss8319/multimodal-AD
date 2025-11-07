@@ -11,6 +11,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.svm import SVC
+import copy
 
 # Handle both relative and absolute imports
 try:
@@ -62,6 +63,10 @@ class EarlyStopping:
             self.best_epoch = epoch
             if model is not None:
                 self.best_state = model.state_dict().copy()
+                # CRITICAL: Use deepcopy to avoid reference issues
+                # state_dict().copy() only creates shallow copy - tensor values are still references!
+                # If training continues, best_state tensors will be updated, losing the "best" state.
+                # self.best_state = copy.deepcopy(model.state_dict())
         else:
             self.counter += 1
             if self.counter >= self.patience:
@@ -79,8 +84,12 @@ class ProteinTransformer(nn.Module):
     """Improved Transformer for protein classification that treats each protein feature as a separate token"""
     def __init__(self, n_features, d_model=64, n_heads=4, n_layers=2, dropout=0.1):
         super().__init__()
-        self.d_model = d_model # The dimensionality of the internal attention and hidden layers
-        self.n_features = n_features # number of protein features in the input data
+        # Store all constructor parameters for model saving/loading
+        self.n_features = n_features
+        self.d_model = d_model
+        self.n_heads = n_heads
+        self.n_layers = n_layers
+        self.dropout = dropout
         
         # Feature embedding: projects each scalar protein value to d_model dimensions
         self.feature_embedding = nn.Linear(1, d_model)
@@ -144,8 +153,10 @@ class ProteinAttentionPooling(nn.Module):
     """
     def __init__(self, n_features, d_model=64, dropout=0.2):
         super().__init__()
+        # Store all constructor parameters for model saving/loading
         self.n_features = n_features
         self.d_model = d_model
+        self.dropout = dropout
         
         # Learnable embedding for each protein's identity
         # Each protein gets its own learned representation
@@ -617,8 +628,13 @@ class CustomTransformerEncoder(nn.Module):
     def __init__(self, n_features, d_model=32, n_heads=2, n_blocks=2, 
                  ffn_dim=64, dropout=0.1):
         super().__init__()
+        # Store all constructor parameters for model saving/loading
         self.n_features = n_features
         self.d_model = d_model
+        self.n_heads = n_heads
+        self.n_blocks = n_blocks
+        self.ffn_dim = ffn_dim
+        self.dropout = dropout
         
         # Initial convolutional layer: transforms input to n×32 feature map
         # Input: (batch, n_features) -> reshape to (batch, 1, n_features)
@@ -739,6 +755,11 @@ class NeuralNetwork(nn.Module):
 
     def __init__(self, n_features, hidden_sizes=(128, 64), dropout=0.2):
         super().__init__()
+        # Store all constructor parameters for model saving/loading
+        self.n_features = n_features
+        self.hidden_sizes = hidden_sizes
+        self.dropout = dropout
+        
         layers = []
         in_dim = n_features
         for h in hidden_sizes:
