@@ -378,14 +378,17 @@ class ProteinLatentExtractor:
             raise RuntimeError(f"Failed to extract activations for {layer_name}")
     
     def extract_latents(self, protein_values, model_name='neural_network.pth', 
-                        layer_name='auto', feature_names=None):
+                        layer_name=None, feature_names=None):
         """
         Generic latent extraction that automatically routes to model-specific methods.
         
         Args:
             protein_values: Raw protein values [n_features]
             model_name: Name of model file (e.g., 'neural_network.pth', 'custom_transformer.pth')
-            layer_name: Which layer to extract from (model-specific)
+            layer_name: Which layer to extract from (model-specific). If None, uses model-specific default:
+                       - NeuralNetwork: 'last_hidden_layer'
+                       - ProteinTransformer: 'transformer_embeddings'
+                       - CustomTransformerEncoder: 'attention_output'
             feature_names: Optional feature names for alignment
         
         Returns:
@@ -396,17 +399,12 @@ class ProteinLatentExtractor:
         model_class_name = model.__class__.__name__
         
         # Route to appropriate extraction method based on model class
+        # Each method has its own default layer_name, so we can pass None if not specified
         if model_class_name == 'NeuralNetwork':
-            if layer_name == 'auto':
-                layer_name = 'last_hidden_layer'
             return self.extract_nn_latents(protein_values, layer_name, feature_names)
         elif model_class_name == 'ProteinTransformer':
-            if layer_name == 'auto':
-                layer_name = 'transformer_embeddings'
             return self.extract_transformer_latents(protein_values, layer_name, feature_names)
         elif model_class_name == 'CustomTransformerEncoder':
-            if layer_name == 'auto':
-                layer_name = 'attention_output'
             return self.extract_custom_transformer_latents(protein_values, layer_name, feature_names)
         else:
             raise ValueError(
