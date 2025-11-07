@@ -327,13 +327,13 @@ def main(config_overrides=None, wandb_run=None):
     # Configuration
     config = {
         # Data paths
-        'data_csv': '/home/ssim0068/data/multimodal-dataset/all_mni.csv',  # All data for CV
+        'data_csv': '/home/ssim0068/data/multimodal-dataset/all_icbm.csv',  # All data for CV
         'brainiac_checkpoint': '/home/ssim0068/code/multimodal-AD/BrainIAC/src/checkpoints/BrainIAC.ckpt',
-        'protein_run_dir': '/home/ssim0068/multimodal-AD/src/protein/runs/run_20251016_205054',
+        'protein_run_dir': '/home/ssim0068/multimodal-AD/src/protein/runs/run_20251107_122132',
         'protein_latents_dir': None,
         
         # MRI Encoder config
-        'mri_encoder': 'dinov3',  # Options: 'brainiac', 'dinov3'
+        'mri_encoder': 'brainiac',  # Options: 'brainiac', 'dinov3'
         'dinov3_hub_repo': '/home/ssim0068/multimodal-AD/src/mri/dinov3',
         'dinov3_model': 'dinov3_vits16',  # dinov3_vits16 (384-dim) or dinov3_vitb16 (768-dim)
         'dinov3_weights': '/home/ssim0068/multimodal-AD/src/mri/dinov3/weights/dinov3_vits16_pretrain_lvd1689m-08c60483.pth',
