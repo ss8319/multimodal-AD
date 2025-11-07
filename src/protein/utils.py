@@ -386,26 +386,27 @@ def create_run_directory():
 
 def extract_model_config(pytorch_model, wrapper_model=None):
     """
-    Extract constructor parameters from a PyTorch model in a generic way.
+    Extract constructor parameters from a PyTorch model.
     
-    This function captures all information needed to reconstruct a model:
+    This function extracts all information needed to reconstruct a model:
     - Model class name and module path (for dynamic import)
-    - All constructor parameters (from model attributes, wrapper, or signature defaults)
+    - All constructor parameters (from model attributes only)
     
-    Priority order for parameter extraction:
-    1. Model attributes (actual values used during construction)
-    2. Wrapper attributes (if parameter stored in sklearn wrapper)
-    3. Signature defaults (if parameter not found elsewhere)
+    Models MUST store all constructor parameters as attributes.
+    If a parameter is missing, this function will raise a clear error.
     
     Args:
         pytorch_model: The actual PyTorch nn.Module instance
-        wrapper_model: Optional sklearn wrapper that may have additional config
+        wrapper_model: Optional (kept for backward compatibility, not used)
         
     Returns:
         dict: Model configuration including:
             - 'model_class': Class name (str)
             - 'model_module': Module path (str)
             - Constructor parameters: All parameters needed to recreate the model
+            
+    Raises:
+        ValueError: If required constructor parameters are missing from model attributes
     """
     config = {}
     
@@ -416,80 +417,41 @@ def extract_model_config(pytorch_model, wrapper_model=None):
     # Get constructor signature to know what parameters to extract
     try:
         sig = inspect.signature(pytorch_model.__class__.__init__)
-        params = sig.parameters
-        param_names = list(params.keys())[1:]  # Skip 'self'
-        
-        # Extract default values from signature (for parameters not stored as attributes)
-        signature_defaults = {}
-        for param_name in param_names:
-            param = params[param_name]
-            if param.default != inspect.Parameter.empty:
-                # Only save simple types
-                default_val = param.default
-                if isinstance(default_val, (int, float, str, bool, tuple, list, type(None))):
-                    signature_defaults[param_name] = default_val
-                elif isinstance(default_val, np.integer):
-                    signature_defaults[param_name] = int(default_val)
-                elif isinstance(default_val, np.floating):
-                    signature_defaults[param_name] = float(default_val)
-    except Exception:
-        # Fallback: try common parameter names
-        param_names = ['n_features', 'd_model', 'n_heads', 'n_layers', 'n_blocks', 
-                      'ffn_dim', 'dropout', 'hidden_sizes']
-        signature_defaults = {}
+        param_names = [p for p in sig.parameters.keys() if p != 'self']
+    except Exception as e:
+        raise ValueError(
+            f"Failed to get constructor signature for {pytorch_model.__class__.__name__}: {e}"
+        )
     
-    # Extract parameters with priority: model attributes > wrapper > signature defaults
+    # Extract parameters ONLY from model attributes (fail-fast approach)
+    missing_params = []
     for param_name in param_names:
-        value = None
-        
-        # Priority 1: Check model attributes (actual values used)
         if hasattr(pytorch_model, param_name):
             try:
                 value = getattr(pytorch_model, param_name)
-            except Exception:
-                pass
-        
-        # Priority 2: Check wrapper (if not found in model)
-        if value is None and wrapper_model is not None:
-            if hasattr(wrapper_model, param_name):
-                try:
-                    value = getattr(wrapper_model, param_name)
-                except Exception:
-                    pass
-        
-        # Priority 3: Use signature default (if not found elsewhere)
-        if value is None and param_name in signature_defaults:
-            value = signature_defaults[param_name]
-        
-        # Save if we found a value and it's a serializable type
-        if value is not None:
-            try:
+                # Only save serializable types
                 if isinstance(value, (int, float, str, bool, tuple, list, type(None))):
                     config[param_name] = value
                 elif isinstance(value, np.integer):
                     config[param_name] = int(value)
                 elif isinstance(value, np.floating):
                     config[param_name] = float(value)
-            except Exception:
-                pass
+                else:
+                    # Non-serializable type - skip but don't fail
+                    pass
+            except Exception as e:
+                missing_params.append(f"{param_name} (error accessing: {e})")
+        else:
+            missing_params.append(param_name)
     
-    # Ensure n_features is always present (critical for model reconstruction)
-    if 'n_features' not in config:
-        # Fallback 1: Check model directly
-        if hasattr(pytorch_model, 'n_features'):
-            config['n_features'] = pytorch_model.n_features
-        # Fallback 2: Check wrapper
-        elif wrapper_model is not None and hasattr(wrapper_model, 'n_features'):
-            config['n_features'] = wrapper_model.n_features
-        # Fallback 3: Infer from model structure
-        elif hasattr(pytorch_model, 'net') and len(pytorch_model.net) > 0:
-            # NeuralNetwork case: infer from first layer
-            try:
-                first_layer = pytorch_model.net[0]
-                if hasattr(first_layer, 'in_features'):
-                    config['n_features'] = first_layer.in_features
-            except Exception:
-                pass
+    # Fail fast if critical parameters are missing
+    if missing_params:
+        raise ValueError(
+            f"Model {pytorch_model.__class__.__name__} is missing required constructor parameters "
+            f"as attributes: {missing_params}\n"
+            f"Ensure the model's __init__ method stores all constructor parameters as instance attributes.\n"
+            f"Example: self.{missing_params[0]} = {missing_params[0]}"
+        )
     
     return config
 
