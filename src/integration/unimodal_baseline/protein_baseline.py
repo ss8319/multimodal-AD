@@ -501,19 +501,19 @@ if __name__ == "__main__":
     parser.add_argument(
         "--model-path",
         type=str,
-        default="src/protein/runs/run_20251016_205054/models/neural_network.pth",
+        default="src/protein/runs/run_20251107_122132/models/neural_network.pth",
         help="Path to pre-trained protein model (.pth for PyTorch models)"
     )
     parser.add_argument(
         "--scaler-path",
         type=str,
-        default="src/protein/runs/run_20251016_205054/scaler.pkl",
+        default="src/protein/runs/run_20251107_122132/scaler.pkl",
         help="Path to pre-fitted scaler (.pkl file)"
     )
     parser.add_argument(
         "--data-csv",
         type=str,
-        default="/home/ssim0068/data/multimodal-dataset/all.csv",
+        default="/home/ssim0068/data/multimodal-dataset/all_mni.csv",
         help="Path to CSV with protein data (same as used for fusion)"
     )
     parser.add_argument(
