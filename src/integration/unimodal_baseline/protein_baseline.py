@@ -106,17 +106,11 @@ def load_protein_model(model_path, model_type='nn'):
     """
     model_path = Path(model_path)
     
-    # Import PyTorch
-    import torch
-    
     # Get device for model loading
     device = get_device()
     
-    # Load checkpoint
-    checkpoint = torch.load(model_path, map_location='cpu')
-    
-    # Use generic loader (works for any PyTorch model)
-    model = load_pytorch_model_generic(checkpoint, device)
+    # Use generic loader (works for any PyTorch model, accepts file path directly)
+    model = load_pytorch_model_generic(model_path, device)
     
     return model
 
@@ -374,16 +368,13 @@ def main(args):
     scaler = load_scaler(scaler_path)
     
     # Validate model-scaler compatibility
-    # Extract n_features from model config for validation
-    import torch
-    checkpoint = torch.load(model_path, map_location='cpu')
-    model_config = checkpoint.get('model_config', {})
-    n_features = model_config.get('n_features')
-    if n_features:
+    # Get n_features directly from loaded model (all models now store it as attribute)
+    if hasattr(model, 'n_features'):
+        n_features = model.n_features
         validate_model_scaler_compatibility(None, scaler, n_features)
-        print(f"  ✅ Model-scaler compatibility validated ({n_features} features)")
+        print(f"  [OK] Model-scaler compatibility validated ({n_features} features)")
     else:
-        print(f"  ⚠️  Warning: Could not validate model-scaler compatibility (n_features not found in config)")
+        print(f"  [WARN] Could not validate model-scaler compatibility (n_features not found in model)")
     
     print()
     
@@ -449,9 +440,9 @@ def main(args):
         # Validate data integrity for this fold
         try:
             validate_data_integrity(X_test, y_test, fold_idx)
-            print(f"  ✅ Data integrity validated")
+            print(f"  [OK] Data integrity validated")
         except ValueError as e:
-            print(f"  ⚠️  Data validation warning: {e}")
+            print(f"  [WARN] Data validation warning: {e}")
             print(f"  Continuing with fold evaluation...")
         
         # Evaluate fold (inference only, no training)
@@ -490,9 +481,9 @@ def main(args):
         with open(save_dir / 'protein_baseline_results.json', 'w') as f:
             json.dump(results_dict, f, indent=2)
         
-        print(f"\n✅ Results saved to: {save_dir / 'protein_baseline_results.json'}")
+        print(f"\n[OK] Results saved to: {save_dir / 'protein_baseline_results.json'}")
     
-    print("\n✅ Protein baseline evaluation complete!")
+    print("\n[OK] Protein baseline evaluation complete!")
 
 
 if __name__ == "__main__":
