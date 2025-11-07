@@ -6,6 +6,7 @@ import pandas as pd
 import pickle
 import torch
 import json
+import inspect
 from datetime import datetime
 from pathlib import Path
 from sklearn.model_selection import StratifiedKFold
@@ -383,9 +384,125 @@ def create_run_directory():
     print(f"Created run directory: {run_dir}")
     return run_dir
 
+def extract_model_config(pytorch_model, wrapper_model=None):
+    """
+    Extract constructor parameters from a PyTorch model in a generic way.
+    
+    This function captures all information needed to reconstruct a model:
+    - Model class name and module path (for dynamic import)
+    - All constructor parameters (from model attributes, wrapper, or signature defaults)
+    
+    Priority order for parameter extraction:
+    1. Model attributes (actual values used during construction)
+    2. Wrapper attributes (if parameter stored in sklearn wrapper)
+    3. Signature defaults (if parameter not found elsewhere)
+    
+    Args:
+        pytorch_model: The actual PyTorch nn.Module instance
+        wrapper_model: Optional sklearn wrapper that may have additional config
+        
+    Returns:
+        dict: Model configuration including:
+            - 'model_class': Class name (str)
+            - 'model_module': Module path (str)
+            - Constructor parameters: All parameters needed to recreate the model
+    """
+    config = {}
+    
+    # Save class information for dynamic loading (REQUIRED)
+    config['model_class'] = pytorch_model.__class__.__name__
+    config['model_module'] = pytorch_model.__class__.__module__
+    
+    # Get constructor signature to know what parameters to extract
+    try:
+        sig = inspect.signature(pytorch_model.__class__.__init__)
+        params = sig.parameters
+        param_names = list(params.keys())[1:]  # Skip 'self'
+        
+        # Extract default values from signature (for parameters not stored as attributes)
+        signature_defaults = {}
+        for param_name in param_names:
+            param = params[param_name]
+            if param.default != inspect.Parameter.empty:
+                # Only save simple types
+                default_val = param.default
+                if isinstance(default_val, (int, float, str, bool, tuple, list, type(None))):
+                    signature_defaults[param_name] = default_val
+                elif isinstance(default_val, np.integer):
+                    signature_defaults[param_name] = int(default_val)
+                elif isinstance(default_val, np.floating):
+                    signature_defaults[param_name] = float(default_val)
+    except Exception:
+        # Fallback: try common parameter names
+        param_names = ['n_features', 'd_model', 'n_heads', 'n_layers', 'n_blocks', 
+                      'ffn_dim', 'dropout', 'hidden_sizes']
+        signature_defaults = {}
+    
+    # Extract parameters with priority: model attributes > wrapper > signature defaults
+    for param_name in param_names:
+        value = None
+        
+        # Priority 1: Check model attributes (actual values used)
+        if hasattr(pytorch_model, param_name):
+            try:
+                value = getattr(pytorch_model, param_name)
+            except Exception:
+                pass
+        
+        # Priority 2: Check wrapper (if not found in model)
+        if value is None and wrapper_model is not None:
+            if hasattr(wrapper_model, param_name):
+                try:
+                    value = getattr(wrapper_model, param_name)
+                except Exception:
+                    pass
+        
+        # Priority 3: Use signature default (if not found elsewhere)
+        if value is None and param_name in signature_defaults:
+            value = signature_defaults[param_name]
+        
+        # Save if we found a value and it's a serializable type
+        if value is not None:
+            try:
+                if isinstance(value, (int, float, str, bool, tuple, list, type(None))):
+                    config[param_name] = value
+                elif isinstance(value, np.integer):
+                    config[param_name] = int(value)
+                elif isinstance(value, np.floating):
+                    config[param_name] = float(value)
+            except Exception:
+                pass
+    
+    # Ensure n_features is always present (critical for model reconstruction)
+    if 'n_features' not in config:
+        # Fallback 1: Check model directly
+        if hasattr(pytorch_model, 'n_features'):
+            config['n_features'] = pytorch_model.n_features
+        # Fallback 2: Check wrapper
+        elif wrapper_model is not None and hasattr(wrapper_model, 'n_features'):
+            config['n_features'] = wrapper_model.n_features
+        # Fallback 3: Infer from model structure
+        elif hasattr(pytorch_model, 'net') and len(pytorch_model.net) > 0:
+            # NeuralNetwork case: infer from first layer
+            try:
+                first_layer = pytorch_model.net[0]
+                if hasattr(first_layer, 'in_features'):
+                    config['n_features'] = first_layer.in_features
+            except Exception:
+                pass
+    
+    return config
+
+
 def save_model(model, model_name, run_dir):
     """
-    Save a trained model to disk
+    Save a trained model to disk in a model-agnostic way.
+    
+    For PyTorch models:
+    - Saves model class name and module for dynamic loading
+    - Extracts constructor parameters automatically
+    - Saves state_dict
+    
     Args:
         model: Trained model (sklearn or PyTorch wrapper)
         model_name: Name of the model
@@ -393,42 +510,25 @@ def save_model(model, model_name, run_dir):
     """
     model_dir = Path(run_dir) / "models"
     model_dir.mkdir(parents=True, exist_ok=True)
+    
     # Check if it's a PyTorch model (has .model attribute with state_dict)
     is_pytorch = hasattr(model, 'model') and hasattr(model.model, 'state_dict')
+    
     if is_pytorch:
         # Save PyTorch model state dict
         model_path = model_dir / f"{model_name}.pth"
-        # Build a generic, model-agnostic config payload
-        generic_config = {}
-        for attr in [
-            'd_model', 'n_heads', 'n_layers', 'dropout', 'hidden_sizes',
-            'lr', 'epochs', 'batch_size', 'patience', 'random_state'
-        ]:
-            if hasattr(model, attr):
-                try:
-                    generic_config[attr] = getattr(model, attr)
-                except Exception:
-                    pass
-        # Try to record feature count if available
-        # Check classifier wrapper first (most reliable)
-        if hasattr(model, 'n_features'):
-            generic_config['n_features'] = model.n_features
-        # Fallback: check model directly
-        elif hasattr(model.model, 'n_features'):
-            generic_config['n_features'] = model.model.n_features
-        # Fallback: infer from NeuralNetwork first layer
-        elif hasattr(model.model, 'net') and len(model.model.net) > 0:
-            try:
-                first_layer = model.model.net[0]
-                if hasattr(first_layer, 'in_features'):
-                    generic_config['n_features'] = first_layer.in_features
-            except Exception:
-                pass
+        
+        # Extract model configuration generically
+        model_config = extract_model_config(model.model, wrapper_model=model)
+        
         torch.save({
             'model_state_dict': model.model.state_dict(),
-            'model_config': generic_config
+            'model_config': model_config
         }, model_path)
+        
         print(f"   Saved PyTorch model: {model_path.name}")
+        print(f"      Model class: {model_config.get('model_class', 'Unknown')}")
+        print(f"      Module: {model_config.get('model_module', 'Unknown')}")
     else:
         # Save sklearn model with pickle
         model_path = model_dir / f"{model_name}.pkl"
