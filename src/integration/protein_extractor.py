@@ -90,14 +90,11 @@ class ProteinLatentExtractor:
                 f"Model not found: {model_path} (cwd={Path.cwd()})"
             )
         
-        # Load checkpoint
-        checkpoint = torch.load(model_path, map_location='cpu')
-        
-        # Use centralized generic loader
-        model = load_pytorch_model_generic(checkpoint, device=self.device)
+        # Use centralized generic loader (accepts file path directly)
+        model = load_pytorch_model_generic(model_path, device=self.device)
         
         # Store model by class name for later reference
-        model_class_name = checkpoint['model_config']['model_class']
+        model_class_name = model.__class__.__name__
         self.loaded_models[model_class_name] = model
         
         return model
