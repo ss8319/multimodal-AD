@@ -34,3 +34,35 @@ AD_CN/proteomics/Biomarkers Consortium Plasma Proteomics MRM/MRI/Zip Files/
 
 # Ignore protein training runs
 src/protein/runs
+
+# Ignore logs and runs directories
+logs/
+runs/
+
+# Ignore SLURM output files (anywhere in repo)
+**/slurm_*.err
+**/slurm_*.out
+slurm_*.err
+slurm_*.out
+
+# Ignore wandb directories
+wandb/
+**/wandb/
+
+# Ignore sweeps directory
+sweeps/
+
+# Ignore specific documentation/analysis files (temporary notes)
+FEATURE_DISTRIBUTION_ANALYSIS.md
+FUSION_IMPROVEMENTS.md
+FUSION_IMPROVEMENT_ROADMAP.md
+FUSION_MODELS_COMPARISON.md
+src/protein/ATTENTION_MODEL_FIXES.md
+
+# Ignore temporary scripts and experimental code
+src/data/mri/remove_data_leak.py
+src/integration/unimodal_baseline/DINOV3_BASELINE_README.md
+src/protein/explain_ig.py
+
+# Ignore experimental directories
+src/mri/dinov3/
