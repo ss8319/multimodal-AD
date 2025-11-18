@@ -41,8 +41,8 @@ class MultimodalDataset(Dataset):
             mri_extractor: MRI feature extractor (BrainIACExtractor or DINOv3Extractor)
             protein_run_dir: Path to protein model run directory (for on-the-fly extraction)
             protein_latents_dir: Path to pre-extracted protein latents directory (recommended)
-            protein_model_type: 'nn' (Neural Network) or 'transformer'
-            protein_layer: Layer to extract from ('last_hidden_layer' for NN, 'transformer_embeddings' for Transformer)
+            protein_model_type: 'nn' (Neural Network), 'transformer', or 'custom_transformer'
+            protein_layer: Layer to extract from ('last_hidden_layer' for NN, 'transformer_embeddings' for Transformer, 'attention_output' for CustomTransformer)
             protein_columns: List of protein column names (auto-detected if None)
             device: Device for inference
         """
@@ -94,7 +94,16 @@ class MultimodalDataset(Dataset):
             self.protein_extractor = ProteinLatentExtractor(protein_run_dir, device)
             self.protein_model_type = protein_model_type
             self.protein_layer = protein_layer
-            print(f"  Protein model: {protein_model_type}, layer: {protein_layer}")
+            
+            # Map model type to model file name for generic loading
+            model_name_map = {
+                'nn': 'neural_network.pth',
+                'transformer': 'protein_transformer.pth',
+                'custom_transformer': 'custom_transformer.pth'
+            }
+            self.protein_model_name = model_name_map.get(protein_model_type, 'neural_network.pth')
+            
+            print(f"  Protein model: {protein_model_type} ({self.protein_model_name}), layer: {protein_layer}")
         else:
             print(f"  No protein model - using raw features")
         
@@ -108,10 +117,12 @@ class MultimodalDataset(Dataset):
             # Extract latents to get actual dimension
             # only using dummy data to get the output dimension of the protein encoder
             dummy_protein = np.random.randn(self.raw_protein_dim).astype(np.float32)
-            if self.protein_model_type == 'nn':
-                dummy_latents = self.protein_extractor.extract_nn_latents(dummy_protein, self.protein_layer)
-            else:  # transformer
-                dummy_latents = self.protein_extractor.extract_transformer_latents(dummy_protein, self.protein_layer)
+            # Use generic extraction method (supports all model types)
+            dummy_latents = self.protein_extractor.extract_latents(
+                dummy_protein, 
+                model_name=self.protein_model_name,
+                layer_name=self.protein_layer
+            )
             self.protein_dim = len(dummy_latents)
         else:
             self.protein_dim = self.raw_protein_dim  # Use raw features
@@ -219,14 +230,13 @@ class MultimodalDataset(Dataset):
             # Extract latents on-the-fly using trained protein model
             row = self.df.iloc[idx]
             protein_values = row[self.protein_columns].values.astype(np.float32)
-            if self.protein_model_type == 'nn':
-                protein_latents = self.protein_extractor.extract_nn_latents(
-                    protein_values, self.protein_layer, feature_names=self.protein_columns
-                )
-            else:  # transformer
-                protein_latents = self.protein_extractor.extract_transformer_latents(
-                    protein_values, self.protein_layer, feature_names=self.protein_columns
-                )
+            # Use generic extraction method (supports all model types)
+            protein_latents = self.protein_extractor.extract_latents(
+                protein_values,
+                model_name=self.protein_model_name,
+                layer_name=self.protein_layer,
+                feature_names=self.protein_columns
+            )
             return protein_latents
         else:
             # Return raw protein values

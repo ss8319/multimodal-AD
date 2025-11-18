@@ -38,6 +38,16 @@ add_protein_module_to_path()
 # Now import protein-specific modules
 from feature_utils import align_features_to_scaler, load_scaler_feature_columns
 
+# Import centralized model loader
+try:
+    from src.protein.model_loader import load_pytorch_model_generic, get_device
+except ImportError:
+    # Fallback: try relative import
+    protein_path = str(Path(__file__).parent.parent.parent / "protein")
+    if protein_path not in sys.path:
+        sys.path.insert(0, protein_path)
+    from model_loader import load_pytorch_model_generic, get_device
+
 
 def normalize_path(path_str):
     """Centralized path normalization helper
@@ -83,95 +93,26 @@ def load_cv_splits(cv_splits_path):
 
 
 def load_protein_model(model_path, model_type='nn'):
-    """Load pre-trained protein model
+    """Load pre-trained protein model using generic dynamic loading.
     
     Args:
         model_path: Path to model file (.pth for PyTorch models)
-        model_type: 'nn' (PyTorch Neural Network) or 'transformer'
+        model_type: 'nn', 'transformer', or 'custom_transformer' (for backward compat, 
+                   but model is auto-detected from checkpoint)
+    
+    Note:
+        The model_type parameter is kept for backward compatibility but is now optional.
+        The model class is automatically detected from the checkpoint's model_config.
     """
     model_path = Path(model_path)
-    
-    # Import PyTorch and model definitions
-    import torch
     
     # Get device for model loading
     device = get_device()
     
-    if model_type == 'nn':
-        # Load PyTorch Neural Network model
-        from model import NeuralNetwork
-        
-        # Load checkpoint
-        checkpoint = torch.load(model_path, map_location='cpu')
-        
-        # Recreate model with saved config
-        if 'model_config' not in checkpoint:
-            raise ValueError("Model checkpoint missing 'model_config'. Cannot load Neural Network model.")
-            
-        model_config = checkpoint['model_config']
-        
-        # Extract architecture parameters
-        n_features = model_config.get('n_features')
-        hidden_sizes = model_config.get('hidden_sizes', (128, 64))
-        dropout = model_config.get('dropout', 0.2)
-        
-        if n_features is None:
-            raise ValueError(
-                "model_config missing 'n_features'. Cannot reconstruct Neural Network.\n"
-                "Please retrain the protein model with the updated code to include n_features in the checkpoint."
-            )
-        
-        # Recreate model
-        model = NeuralNetwork(
-            n_features=n_features,
-            hidden_sizes=hidden_sizes,
-            dropout=dropout
-        )
-        
-        # Load weights
-        model.load_state_dict(checkpoint['model_state_dict'])
-        model.to(device)  # Move model to appropriate device
-        model.eval()
-        
-        print(f"Loaded pre-trained Neural Network model from {model_path}")
-        print(f"  Model architecture: n_features={n_features}, hidden_sizes={hidden_sizes}, dropout={dropout}")
-        
-        return model
+    # Use generic loader (works for any PyTorch model, accepts file path directly)
+    model = load_pytorch_model_generic(model_path, device)
     
-    elif model_type == 'transformer':
-        # Load PyTorch Transformer model
-        from model import ProteinTransformer
-        
-        # Load checkpoint
-        checkpoint = torch.load(model_path, map_location='cpu')
-        
-        # Recreate model with saved config
-        if 'model_config' not in checkpoint:
-            raise ValueError("Model checkpoint missing 'model_config'. Cannot load transformer model.")
-            
-        model_config = checkpoint['model_config']
-        model = ProteinTransformer(**model_config)
-        
-        # For logging
-        n_features = model_config.get('n_features')
-        d_model = model_config.get('d_model')
-        n_layers = model_config.get('n_layers')
-        n_heads = model_config.get('n_heads')
-        
-        print(f"Loaded model config from checkpoint")
-        
-        # Load weights
-        model.load_state_dict(checkpoint.get('model_state_dict', checkpoint))
-        model.to(device)  # Move model to appropriate device
-        model.eval()
-        
-        print(f"Loaded pre-trained Transformer model from {model_path}")
-        print(f"  Model architecture: n_features={n_features}, d_model={d_model}, n_layers={n_layers}, n_heads={n_heads}")
-        
-        return model
-    
-    else:
-        raise ValueError(f"Unsupported model_type: {model_type}. Use 'nn' or 'transformer'")
+    return model
 
 
 def validate_model_scaler_compatibility(model, scaler, n_features):
@@ -216,18 +157,6 @@ def validate_data_integrity(X, y, fold_idx):
         raise ValueError(f"Fold {fold_idx}: Infinite values found in features")
 
 
-def get_device():
-    """Get the appropriate device for PyTorch operations"""
-    import torch
-    if torch.cuda.is_available():
-        device = torch.device('cuda')
-        print(f"  Using GPU: {torch.cuda.get_device_name()}")
-    else:
-        device = torch.device('cpu')
-        print(f"  Using CPU")
-    return device
-
-
 def load_scaler(scaler_path):
     """Load pre-fitted scaler with error handling"""
     try:
@@ -264,12 +193,12 @@ def evaluate_fold_test(model, scaler, X_test, y_test, fold_idx, model_type='nn')
     X_test_scaled = scaler.transform(X_test)
     
     # Run inference (no training)
-    if model_type in ['nn', 'transformer']:
-        # PyTorch model (both Neural Network and Transformer)
-        import torch
-        import torch.nn.functional as F
-        
-        # Get device from model
+    # Check if it's a PyTorch model (has state_dict method)
+    import torch
+    import torch.nn.functional as F
+    
+    if hasattr(model, 'state_dict'):
+        # PyTorch model (any nn.Module)
         device = next(model.parameters()).device
         
         model.eval()
@@ -278,9 +207,8 @@ def evaluate_fold_test(model, scaler, X_test, y_test, fold_idx, model_type='nn')
             logits = model(X_test_tensor)
             test_probs = F.softmax(logits, dim=1)[:, 1].cpu().numpy()
             test_preds = torch.argmax(logits, dim=1).cpu().numpy()
-    
     else:
-        raise ValueError(f"Unsupported model_type: {model_type}. Use 'nn' or 'transformer'")
+        raise ValueError(f"Unsupported model type. Expected PyTorch nn.Module, got {type(model)}")
     
     # Calculate metrics
     test_acc = accuracy_score(y_test, test_preds)
@@ -440,15 +368,13 @@ def main(args):
     scaler = load_scaler(scaler_path)
     
     # Validate model-scaler compatibility
-    if args.model_type == 'nn':
-        # Extract n_features from model config for validation
-        import torch
-        checkpoint = torch.load(model_path, map_location='cpu')
-        model_config = checkpoint.get('model_config', {})
-        n_features = model_config.get('n_features')
-        if n_features:
-            validate_model_scaler_compatibility(None, scaler, n_features)
-            print(f"  ✅ Model-scaler compatibility validated ({n_features} features)")
+    # Get n_features directly from loaded model (all models now store it as attribute)
+    if hasattr(model, 'n_features'):
+        n_features = model.n_features
+        validate_model_scaler_compatibility(None, scaler, n_features)
+        print(f"  [OK] Model-scaler compatibility validated ({n_features} features)")
+    else:
+        print(f"  [WARN] Could not validate model-scaler compatibility (n_features not found in model)")
     
     print()
     
@@ -514,9 +440,9 @@ def main(args):
         # Validate data integrity for this fold
         try:
             validate_data_integrity(X_test, y_test, fold_idx)
-            print(f"  ✅ Data integrity validated")
+            print(f"  [OK] Data integrity validated")
         except ValueError as e:
-            print(f"  ⚠️  Data validation warning: {e}")
+            print(f"  [WARN] Data validation warning: {e}")
             print(f"  Continuing with fold evaluation...")
         
         # Evaluate fold (inference only, no training)
@@ -555,9 +481,9 @@ def main(args):
         with open(save_dir / 'protein_baseline_results.json', 'w') as f:
             json.dump(results_dict, f, indent=2)
         
-        print(f"\n✅ Results saved to: {save_dir / 'protein_baseline_results.json'}")
+        print(f"\n[OK] Results saved to: {save_dir / 'protein_baseline_results.json'}")
     
-    print("\n✅ Protein baseline evaluation complete!")
+    print("\n[OK] Protein baseline evaluation complete!")
 
 
 if __name__ == "__main__":
@@ -568,26 +494,26 @@ if __name__ == "__main__":
     parser.add_argument(
         "--model-type",
         type=str,
-        choices=['nn', 'transformer'],
+        choices=['nn', 'transformer', 'custom_transformer'],
         default='nn',
-        help="Type of protein model: 'nn' (PyTorch Neural Network) or 'transformer'"
+        help="Type of protein model: 'nn' (PyTorch Neural Network), 'transformer', or 'custom_transformer'"
     )
     parser.add_argument(
         "--model-path",
         type=str,
-        default="src/protein/runs/run_20251016_205054/models/neural_network.pth",
+        default="src/protein/runs/run_20251107_122132/models/neural_network.pth",
         help="Path to pre-trained protein model (.pth for PyTorch models)"
     )
     parser.add_argument(
         "--scaler-path",
         type=str,
-        default="src/protein/runs/run_20251016_205054/scaler.pkl",
+        default="src/protein/runs/run_20251107_122132/scaler.pkl",
         help="Path to pre-fitted scaler (.pkl file)"
     )
     parser.add_argument(
         "--data-csv",
         type=str,
-        default="/home/ssim0068/data/multimodal-dataset/all.csv",
+        default="/home/ssim0068/data/multimodal-dataset/all_mni.csv",
         help="Path to CSV with protein data (same as used for fusion)"
     )
     parser.add_argument(

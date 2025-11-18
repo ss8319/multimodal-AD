@@ -6,6 +6,7 @@ import pandas as pd
 import pickle
 import torch
 import json
+import inspect
 from datetime import datetime
 from pathlib import Path
 from sklearn.model_selection import StratifiedKFold
@@ -383,9 +384,114 @@ def create_run_directory():
     print(f"Created run directory: {run_dir}")
     return run_dir
 
+def extract_model_config(pytorch_model, wrapper_model=None):
+    """
+    Extract constructor parameters from a PyTorch model.
+    
+    This function extracts all information needed to reconstruct a model:
+    - Model class name and module path (for dynamic import)
+    - All constructor parameters (from model attributes only)
+    
+    Models MUST store all constructor parameters as attributes.
+    If a parameter is missing, this function will raise a clear error.
+    
+    Args:
+        pytorch_model: The actual PyTorch nn.Module instance
+        wrapper_model: Optional (kept for backward compatibility, not used)
+        
+    Returns:
+        dict: Model configuration including:
+            - 'model_class': Class name (str)
+            - 'model_module': Module path (str)
+            - Constructor parameters: All parameters needed to recreate the model
+            
+    Raises:
+        ValueError: If required constructor parameters are missing from model attributes
+    """
+    config = {}
+    
+    # Save class information for dynamic loading (REQUIRED)
+    config['model_class'] = pytorch_model.__class__.__name__
+    
+    # Normalize module path to always use full path for reliable imports
+    # This handles cases where models are imported as 'from model import NeuralNetwork'
+    # vs 'from src.protein.model import NeuralNetwork'
+    raw_module = pytorch_model.__class__.__module__
+    
+    # Map common short module names to full paths
+    module_normalization_map = {
+        'model': 'src.protein.model',
+        'src.protein.model': 'src.protein.model',  # Already correct
+    }
+    
+    # Normalize module path
+    if raw_module in module_normalization_map:
+        config['model_module'] = module_normalization_map[raw_module]
+    elif raw_module.startswith('src.protein.'):
+        # Already has full path prefix
+        config['model_module'] = raw_module
+    else:
+        # Try to infer full path from class name and known protein models
+        protein_model_classes = ['NeuralNetwork', 'ProteinTransformer', 'ProteinAttentionPooling', 
+                                'CustomTransformerEncoder', 'AttentionBlock']
+        if config['model_class'] in protein_model_classes:
+            # Assume it's a protein model and use full path
+            config['model_module'] = 'src.protein.model'
+        else:
+            # Unknown model, use as-is (might be from another module)
+            config['model_module'] = raw_module
+    
+    # Get constructor signature to know what parameters to extract
+    try:
+        sig = inspect.signature(pytorch_model.__class__.__init__)
+        param_names = [p for p in sig.parameters.keys() if p != 'self']
+    except Exception as e:
+        raise ValueError(
+            f"Failed to get constructor signature for {pytorch_model.__class__.__name__}: {e}"
+        )
+    
+    # Extract parameters ONLY from model attributes (fail-fast approach)
+    missing_params = []
+    for param_name in param_names:
+        if hasattr(pytorch_model, param_name):
+            try:
+                value = getattr(pytorch_model, param_name)
+                # Only save serializable types
+                if isinstance(value, (int, float, str, bool, tuple, list, type(None))):
+                    config[param_name] = value
+                elif isinstance(value, np.integer):
+                    config[param_name] = int(value)
+                elif isinstance(value, np.floating):
+                    config[param_name] = float(value)
+                else:
+                    # Non-serializable type - skip but don't fail
+                    pass
+            except Exception as e:
+                missing_params.append(f"{param_name} (error accessing: {e})")
+        else:
+            missing_params.append(param_name)
+    
+    # Fail fast if critical parameters are missing
+    if missing_params:
+        raise ValueError(
+            f"Model {pytorch_model.__class__.__name__} is missing required constructor parameters "
+            f"as attributes: {missing_params}\n"
+            f"Ensure the model's __init__ method stores all constructor parameters as instance attributes.\n"
+            f"Example: self.{missing_params[0]} = {missing_params[0]}"
+        )
+    
+    return config
+
+
 def save_model(model, model_name, run_dir):
     """
-    Save a trained model to disk
+    Save a trained model to disk in a model-agnostic way.
+    
+    For PyTorch models:
+    - Saves model class name and module for dynamic loading
+    - Extracts constructor parameters automatically
+    - Saves state_dict
+    
     Args:
         model: Trained model (sklearn or PyTorch wrapper)
         model_name: Name of the model
@@ -393,42 +499,25 @@ def save_model(model, model_name, run_dir):
     """
     model_dir = Path(run_dir) / "models"
     model_dir.mkdir(parents=True, exist_ok=True)
+    
     # Check if it's a PyTorch model (has .model attribute with state_dict)
     is_pytorch = hasattr(model, 'model') and hasattr(model.model, 'state_dict')
+    
     if is_pytorch:
         # Save PyTorch model state dict
         model_path = model_dir / f"{model_name}.pth"
-        # Build a generic, model-agnostic config payload
-        generic_config = {}
-        for attr in [
-            'd_model', 'n_heads', 'n_layers', 'dropout', 'hidden_sizes',
-            'lr', 'epochs', 'batch_size', 'patience', 'random_state'
-        ]:
-            if hasattr(model, attr):
-                try:
-                    generic_config[attr] = getattr(model, attr)
-                except Exception:
-                    pass
-        # Try to record feature count if available
-        # Check classifier wrapper first (most reliable)
-        if hasattr(model, 'n_features'):
-            generic_config['n_features'] = model.n_features
-        # Fallback: check model directly
-        elif hasattr(model.model, 'n_features'):
-            generic_config['n_features'] = model.model.n_features
-        # Fallback: infer from NeuralNetwork first layer
-        elif hasattr(model.model, 'net') and len(model.model.net) > 0:
-            try:
-                first_layer = model.model.net[0]
-                if hasattr(first_layer, 'in_features'):
-                    generic_config['n_features'] = first_layer.in_features
-            except Exception:
-                pass
+        
+        # Extract model configuration generically
+        model_config = extract_model_config(model.model, wrapper_model=model)
+        
         torch.save({
             'model_state_dict': model.model.state_dict(),
-            'model_config': generic_config
+            'model_config': model_config
         }, model_path)
+        
         print(f"   Saved PyTorch model: {model_path.name}")
+        print(f"      Model class: {model_config.get('model_class', 'Unknown')}")
+        print(f"      Module: {model_config.get('model_module', 'Unknown')}")
     else:
         # Save sklearn model with pickle
         model_path = model_dir / f"{model_name}.pkl"

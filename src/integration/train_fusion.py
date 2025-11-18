@@ -329,7 +329,7 @@ def main(config_overrides=None, wandb_run=None):
         # Data paths
         'data_csv': '/home/ssim0068/data/multimodal-dataset/all_icbm.csv',  # All data for CV
         'brainiac_checkpoint': '/home/ssim0068/code/multimodal-AD/BrainIAC/src/checkpoints/BrainIAC.ckpt',
-        'protein_run_dir': '/home/ssim0068/multimodal-AD/src/protein/runs/run_20251016_205054',
+        'protein_run_dir': '/home/ssim0068/multimodal-AD/src/protein/runs/run_20251107_122132',
         'protein_latents_dir': None,
         
         # MRI Encoder config
@@ -342,8 +342,8 @@ def main(config_overrides=None, wandb_run=None):
         'dinov3_image_size': 224,  # 2D crop size
         
         # Model config
-        'protein_model_type': 'nn',  # 'nn' (Neural Network) or 'transformer'
-        'protein_layer': 'last_hidden_layer',  # 'last_hidden_layer' for NN, 'transformer_embeddings' for Transformer
+        'protein_model_type': 'nn',  # 'nn' (Neural Network), 'transformer', or 'custom_transformer'
+        'protein_layer': 'last_hidden_layer',  # 'last_hidden_layer' for NN, 'transformer_embeddings' for Transformer, 'attention_output' for CustomTransformer
         'fusion_model_type': 'kronecker',  # 'simple', 'weighted_attention', 'asymmetric', 'cross_modal_attention', 'cross_transformer', 'kronecker'
         'hidden_dim': 128, #params for the fusion model
         'fusion_dim': 128, #params for weighted fusion model (shared embedding dimension)
@@ -366,7 +366,7 @@ def main(config_overrides=None, wandb_run=None):
         
         # Training config
         'batch_size': 8 if torch.cuda.is_available() else 4,
-        'num_epochs': 15,
+        'num_epochs': 20,
         'learning_rate': 0.001,
         'model_seed': 42,
         'device': 'cuda' if torch.cuda.is_available() else 'cpu',
@@ -377,7 +377,7 @@ def main(config_overrides=None, wandb_run=None):
         'focal_gamma': 2.0,        # Focusing parameter; when gamma is 0, the loss is equivalent to the cross entropy loss.
         
         # Model selection metric
-        'best_metric': 'composite',  # Options: 'composite', 'val_auc', 'val_balanced_acc', 'val_f1', 'val_acc', val_mcc'
+        'best_metric': 'val_mcc',  # Options: 'composite', 'val_auc', 'val_balanced_acc', 'val_f1', 'val_acc', val_mcc'
 
         # Weights & Biases defaults (env overrides supported)
         'wandb_project': os.environ.get('WANDB_PROJECT') or 'multimodal-ad',

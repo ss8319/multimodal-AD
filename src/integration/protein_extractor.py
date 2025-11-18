@@ -1,6 +1,8 @@
 """
 Protein feature extractor for multimodal dataset
-Extracts latents from trained protein models (PyTorch NeuralNetwork or ProteinTransformer)
+Extracts latents from trained protein models (any PyTorch model architecture)
+
+Uses centralized model loading for model-agnostic support.
 """
 
 import torch
@@ -13,12 +15,13 @@ import sys
 
 from sklearn.preprocessing import StandardScaler
 
-# Import PyTorch models (will be loaded on demand)
+# Import centralized model loader
 try:
-    from src.protein.model import NeuralNetwork, ProteinTransformer
+    from src.protein.model_loader import load_pytorch_model_generic
 except ImportError:
-    NeuralNetwork = None
-    ProteinTransformer = None
+    # Fallback for relative imports
+    sys.path.append(str(Path(__file__).parent.parent / "protein"))
+    from model_loader import load_pytorch_model_generic
 
 # Feature alignment utilities
 try:
@@ -68,92 +71,63 @@ class ProteinLatentExtractor:
             self.scaler_feature_columns = None
         
         # Initialize models (will be loaded on demand)
-        self.nn_model = None
-        self.transformer_model = None
+        # Store models by their class name for generic access
+        self.loaded_models = {}  # {model_class_name: model_instance}
         
-    def load_nn_model(self):
-        """Load PyTorch NeuralNetwork model"""
-        if self.nn_model is not None:
-            return self.nn_model
+    def _load_model_generic(self, model_name):
+        """
+        Generic model loader that works with any PyTorch model architecture.
+        
+        Args:
+            model_name: Name of model file (e.g., 'neural_network.pth', 'custom_transformer.pth')
             
-        model_path = self.run_dir / "models" / "neural_network.pth"
+        Returns:
+            Loaded PyTorch model in eval mode
+        """
+        model_path = self.run_dir / "models" / model_name
         if not model_path.exists():
             raise FileNotFoundError(
-                f"Neural Network model not found: {model_path} (cwd={Path.cwd()})"
+                f"Model not found: {model_path} (cwd={Path.cwd()})"
             )
         
-        # Check if NeuralNetwork is available
-        if NeuralNetwork is None:
-            raise ImportError("NeuralNetwork not available. Make sure src.protein.model is accessible.")
+        # Use centralized generic loader (accepts file path directly)
+        model = load_pytorch_model_generic(model_path, device=self.device)
         
-        # Load model checkpoint
-        checkpoint = torch.load(model_path, map_location=self.device)
+        # Store model by class name for later reference
+        model_class_name = model.__class__.__name__
+        self.loaded_models[model_class_name] = model
         
-        # Require model_config for deterministic reconstruction
-        if 'model_config' not in checkpoint:
-            raise ValueError("Model checkpoint missing 'model_config'. Cannot load Neural Network model.")
-        config = checkpoint['model_config']
-        
-        # Extract architecture parameters
-        n_features = config.get('n_features')
-        hidden_sizes = config.get('hidden_sizes', (128, 64))
-        dropout = config.get('dropout', 0.2)
-        
-        if n_features is None:
-            raise ValueError(
-                "model_config missing 'n_features'. Cannot reconstruct Neural Network.\n"
-                "Please retrain the protein model with the updated code to include n_features in the checkpoint."
-            )
-        
-        # Reconstruct model
-        self.nn_model = NeuralNetwork(
-            n_features=n_features,
-            hidden_sizes=hidden_sizes,
-            dropout=dropout
-        )
-        self.nn_model.load_state_dict(checkpoint['model_state_dict'])
-        self.nn_model.to(self.device)
-        self.nn_model.eval()
-        
-        print(f"  Loaded Neural Network model from {model_path}")
-        print(f"    Architecture: n_features={n_features}, hidden_sizes={hidden_sizes}, dropout={dropout}")
-        return self.nn_model
+        return model
     
-    def _infer_model_config(self, state_dict):
+    def load_nn_model(self):
         """
-        DEPRECATED: We now require checkpoints to include 'model_config'.
-        This method is kept only to preserve the interface; it will raise.
+        Load PyTorch NeuralNetwork model (backward compatibility wrapper).
+        
+        Uses generic loader internally.
         """
-        raise ValueError("Checkpoint missing 'model_config'. Please retrain/save models with model_config.")
+        model_name = "neural_network.pth"
+        model = self._load_model_generic(model_name)
+        return model
     
     def load_transformer_model(self):
-        """Load ProteinTransformer model"""
-        if self.transformer_model is not None:
-            return self.transformer_model
-            
-        model_path = self.run_dir / "models" / "protein_transformer.pth"
-        if not model_path.exists():
-            raise FileNotFoundError(f"Transformer model not found: {model_path}")
+        """
+        Load ProteinTransformer model (backward compatibility wrapper).
         
-        # Check if ProteinTransformer is available
-        if ProteinTransformer is None:
-            raise ImportError("ProteinTransformer not available. Make sure src.protein.model is accessible.")
+        Uses generic loader internally.
+        """
+        model_name = "protein_transformer.pth"
+        model = self._load_model_generic(model_name)
+        return model
+    
+    def load_custom_transformer_model(self):
+        """
+        Load CustomTransformerEncoder model.
         
-        # Load model state
-        checkpoint = torch.load(model_path, map_location=self.device)
-        
-        # Require model_config for deterministic reconstruction
-        if 'model_config' not in checkpoint:
-            raise ValueError("Model checkpoint missing 'model_config'. Cannot load Transformer model.")
-        config = checkpoint['model_config']
-        
-        self.transformer_model = ProteinTransformer(**config)
-        self.transformer_model.load_state_dict(checkpoint['model_state_dict'])
-        self.transformer_model.to(self.device)
-        self.transformer_model.eval()
-        
-        print(f"  Loaded Transformer model from {model_path}")
-        return self.transformer_model
+        Uses generic loader internally.
+        """
+        model_name = "custom_transformer.pth"
+        model = self._load_model_generic(model_name)
+        return model
     
     def preprocess_protein_data(self, protein_values, feature_names=None):
         """
@@ -328,6 +302,115 @@ class ProteinLatentExtractor:
             return activations[layer_name].astype(np.float32)
         else:
             raise RuntimeError(f"Failed to extract activations for {layer_name}")
+    
+    def extract_custom_transformer_latents(self, protein_values, layer_name='attention_output', feature_names=None):
+        """
+        Extract latents from CustomTransformerEncoder model
+        
+        Args:
+            protein_values: Raw protein values [n_features]
+            layer_name: Which layer to extract from
+                       Options:
+                       - 'conv_output': After convolutional layer (n_features × d_model)
+                       - 'attention_output': After attention blocks (n_features × d_model)
+                       - 'classifier_input': Before classifier (flattened, n_features * d_model)
+        
+        Returns:
+            Latent features from specified layer
+        """
+        # Load model if not already loaded
+        model = self.load_custom_transformer_model()
+        
+        # Preprocess data
+        X_scaled = self.preprocess_protein_data(protein_values, feature_names)
+        
+        # Convert to tensor
+        X_tensor = torch.FloatTensor(X_scaled).unsqueeze(0).to(self.device)  # [1, n_features]
+        
+        # Extract features using hooks
+        activations = {}
+        
+        def get_activation(name):
+            def hook(module, input, output):
+                # Handle different output shapes
+                if isinstance(output, tuple):
+                    output = output[0]
+                # Flatten for consistent output format
+                output_np = output.detach().cpu().numpy()
+                if output_np.ndim > 1:
+                    activations[name] = output_np.flatten()
+                else:
+                    activations[name] = output_np
+            return hook
+        
+        # Register hooks based on layer_name
+        if layer_name == 'conv_output':
+            # After conv layer: (batch, d_model, n_features) -> transpose -> (batch, n_features, d_model)
+            hook = model.conv_layer.register_forward_hook(get_activation('conv_output'))
+        elif layer_name == 'attention_output':
+            # After attention blocks: (batch, n_features, d_model)
+            # Hook on the last attention block
+            if len(model.attention_blocks) > 0:
+                hook = model.attention_blocks[-1].register_forward_hook(get_activation('attention_output'))
+            else:
+                raise ValueError("Model has no attention blocks")
+        elif layer_name == 'classifier_input':
+            # Before classifier: need to flatten (batch, n_features, d_model) -> (batch, n_features * d_model)
+            # Hook on classifier's Flatten layer
+            hook = model.classifier[0].register_forward_hook(get_activation('classifier_input'))
+        else:
+            raise ValueError(
+                f"Unknown layer: {layer_name}. "
+                f"Options: 'conv_output', 'attention_output', 'classifier_input'"
+            )
+        
+        # Forward pass
+        with torch.no_grad():
+            _ = model(X_tensor)
+        
+        # Remove hook
+        hook.remove()
+        
+        # Return the requested layer's activations
+        if layer_name in activations:
+            return activations[layer_name].astype(np.float32)
+        else:
+            raise RuntimeError(f"Failed to extract activations for {layer_name}")
+    
+    def extract_latents(self, protein_values, model_name='neural_network.pth', 
+                        layer_name=None, feature_names=None):
+        """
+        Generic latent extraction that automatically routes to model-specific methods.
+        
+        Args:
+            protein_values: Raw protein values [n_features]
+            model_name: Name of model file (e.g., 'neural_network.pth', 'custom_transformer.pth')
+            layer_name: Which layer to extract from (model-specific). If None, uses model-specific default:
+                       - NeuralNetwork: 'last_hidden_layer'
+                       - ProteinTransformer: 'transformer_embeddings'
+                       - CustomTransformerEncoder: 'attention_output'
+            feature_names: Optional feature names for alignment
+        
+        Returns:
+            Latent features from specified layer
+        """
+        # Load model to get its class name
+        model = self._load_model_generic(model_name)
+        model_class_name = model.__class__.__name__
+        
+        # Route to appropriate extraction method based on model class
+        # Each method has its own default layer_name, so we can pass None if not specified
+        if model_class_name == 'NeuralNetwork':
+            return self.extract_nn_latents(protein_values, layer_name, feature_names)
+        elif model_class_name == 'ProteinTransformer':
+            return self.extract_transformer_latents(protein_values, layer_name, feature_names)
+        elif model_class_name == 'CustomTransformerEncoder':
+            return self.extract_custom_transformer_latents(protein_values, layer_name, feature_names)
+        else:
+            raise ValueError(
+                f"Unknown model class: {model_class_name}. "
+                f"Supported: NeuralNetwork, ProteinTransformer, CustomTransformerEncoder"
+            )
 
 
 if __name__ == "__main__":
