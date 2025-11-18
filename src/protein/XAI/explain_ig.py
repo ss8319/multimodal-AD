@@ -14,68 +14,25 @@ Key API patterns used:
 """
 
 import numpy as np
-import pandas as pd
-import pickle
 import torch
 import torch.nn as nn
 import matplotlib.pyplot as plt
 from pathlib import Path
 from captum.attr import IntegratedGradients
-from captum.attr import visualization as viz
 
-# Import project modules (relative imports from parent package)
-# Fallback to absolute imports if running as script
+# Import shared XAI utilities
 try:
-    from ..dataset import ProteinDataLoader
-    from ..model import NeuralNetworkClassifier, NeuralNetwork
-    from ..feature_utils import load_scaler_feature_columns, align_features_to_scaler
+    from .model_loader import load_model
+    from .data_utils import prepare_data
 except ImportError:
     # Fallback for when running as script directly
     import sys
-    sys.path.insert(0, str(Path(__file__).parent.parent))
-    from dataset import ProteinDataLoader
-    from model import NeuralNetworkClassifier, NeuralNetwork
-    from feature_utils import load_scaler_feature_columns, align_features_to_scaler
+    sys.path.insert(0, str(Path(__file__).parent))
+    from model_loader import load_model
+    from data_utils import prepare_data
 
-
-def load_model(run_dir, model_name):
-    """Load a saved model from the run directory"""
-    models_dir = Path(run_dir) / "models"
-    
-    if model_name == "neural_network":
-        # Load PyTorch model
-        model_path = models_dir / "neural_network.pth"
-        checkpoint = torch.load(model_path, map_location='cpu')
-        model_config = checkpoint['model_config']
-        
-        # Recreate the wrapper
-        n_features = model_config.get('n_features')
-        hidden_sizes = model_config.get('hidden_sizes', (128, 64))
-        dropout = model_config.get('dropout', 0.2)
-        
-        wrapper = NeuralNetworkClassifier(
-            hidden_sizes=hidden_sizes,
-            dropout=dropout,
-            random_state=model_config.get('random_state', 42)
-        )
-        wrapper.n_features = n_features
-        
-        # Set classes_ (required for sklearn compatibility)
-        wrapper.classes_ = np.array([0, 1])  # CN=0, AD=1
-        wrapper.n_classes_ = 2
-        
-        # Recreate and load the neural network
-        wrapper.model = NeuralNetwork(n_features=n_features, hidden_sizes=hidden_sizes, dropout=dropout)
-        wrapper.model.load_state_dict(checkpoint['model_state_dict'])
-        wrapper.model.eval()
-        
-        return wrapper
-    else:
-        # Load sklearn model
-        model_path = models_dir / f"{model_name}.pkl"
-        with open(model_path, 'rb') as f:
-            model = pickle.load(f)
-        return model
+# Alias for backward compatibility
+prepare_data_for_ig = prepare_data
 
 
 def create_pytorch_lr_model(sklearn_lr, n_features):
@@ -107,59 +64,6 @@ def create_pytorch_lr_model(sklearn_lr, n_features):
     
     pytorch_model.eval()
     return pytorch_model
-
-
-def prepare_data_for_ig(run_dir, csv_path, label_col='research_group', id_col='RID', is_background=False):
-    """
-    Prepare data using the same preprocessing pipeline as training
-    
-    Args:
-        run_dir: Directory with saved scaler and feature order
-        csv_path: Path to CSV file (train or test)
-        label_col: Label column name
-        id_col: Subject ID column name
-        is_background: If True, this is background data (train set)
-    
-    Returns:
-        X_scaled: Scaled features ready for IG (numpy array)
-        feature_names: List of feature names in correct order
-        df: Original dataframe with metadata
-    """
-    # Load scaler and feature order
-    scaler_path = Path(run_dir) / "scaler.pkl"
-    with open(scaler_path, 'rb') as f:
-        scaler = pickle.load(f)
-    
-    feature_columns = load_scaler_feature_columns(run_dir)
-    if feature_columns is None:
-        raise ValueError("Could not load feature columns from scaler_features.json")
-    
-    # Load data
-    data_loader = ProteinDataLoader(
-        data_path=csv_path,
-        label_col=label_col,
-        id_col=id_col,
-        random_state=42
-    )
-    
-    df = data_loader.load_data()
-    
-    # Manually extract features (same logic as prepare_features but skip label encoding)
-    exclude_cols = [id_col, label_col, 'VISCODE', 'subject_age', 'Sex', 'Age', 'Education']
-    feature_cols = [c for c in df.columns if c not in exclude_cols]
-    
-    # Extract features and impute missing values
-    X_raw = df[feature_cols].fillna(df[feature_cols].median())
-    
-    # Align features to training order (critical!)
-    X_aligned = align_features_to_scaler(X_raw, scaler, feature_columns)
-    
-    # Scale using training scaler
-    X_scaled = scaler.transform(X_aligned)
-    
-    data_type = "background (train)" if is_background else "explained (test)"
-    print(f"Prepared {data_type} data: {X_scaled.shape[0]} samples, {X_scaled.shape[1]} features")
-    return X_scaled, feature_columns, df
 
 
 def compute_baseline(background, method='mean'):
@@ -654,49 +558,46 @@ def main():
     # Load models
     print("\nLOADING MODELS")
     print("-"*70)
+    lr_model = None
+    nn_model = None
+    
     try:
         lr_model = load_model(run_dir, "logistic_regression")
         print("   ✓ Loaded Logistic Regression")
     except Exception as e:
         print(f"   ✗ Failed to load Logistic Regression: {e}")
-        lr_model = None
+        import traceback
+        traceback.print_exc()
+        raise  # Re-raise to fail fast with clear error
     
     try:
         nn_model = load_model(run_dir, "neural_network")
         print("   ✓ Loaded Neural Network")
     except Exception as e:
         print(f"   ✗ Failed to load Neural Network: {e}")
-        nn_model = None
+        import traceback
+        traceback.print_exc()
+        raise  # Re-raise to fail fast with clear error
     
     # Generate IG explanations
     print("\nGENERATING INTEGRATED GRADIENTS EXPLANATIONS")
     print("-"*70)
     
     if lr_model is not None:
-        try:
-            explain_logistic_regression(
-                lr_model, background, explained, feature_names, run_dir,
-                baseline_method=args.baseline_method,
-                n_steps=args.n_steps,
-                target_class=args.target_class
-            )
-        except Exception as e:
-            print(f"   ✗ Error explaining Logistic Regression: {e}")
-            import traceback
-            traceback.print_exc()
+        explain_logistic_regression(
+            lr_model, background, explained, feature_names, run_dir,
+            baseline_method=args.baseline_method,
+            n_steps=args.n_steps,
+            target_class=args.target_class
+        )
     
     if nn_model is not None:
-        try:
-            explain_neural_network(
-                nn_model, background, explained, feature_names, run_dir,
-                baseline_method=args.baseline_method,
-                n_steps=args.n_steps,
-                target_class=args.target_class
-            )
-        except Exception as e:
-            print(f"   ✗ Error explaining Neural Network: {e}")
-            import traceback
-            traceback.print_exc()
+        explain_neural_network(
+            nn_model, background, explained, feature_names, run_dir,
+            baseline_method=args.baseline_method,
+            n_steps=args.n_steps,
+            target_class=args.target_class
+        )
     
     print("\n" + "="*70)
     print("INTEGRATED GRADIENTS EXPLANATION COMPLETE!")
