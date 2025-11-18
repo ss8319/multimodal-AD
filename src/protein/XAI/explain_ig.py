@@ -27,7 +27,9 @@ try:
 except ImportError:
     # Fallback for when running as script directly
     import sys
-    sys.path.insert(0, str(Path(__file__).parent))
+    xai_dir = Path(__file__).parent  # src/protein/XAI
+    if str(xai_dir) not in sys.path:
+        sys.path.insert(0, str(xai_dir))
     from model_loader import load_model
     from data_utils import prepare_data
 
@@ -45,6 +47,11 @@ def create_pytorch_lr_model(sklearn_lr, n_features):
     
     Returns:
         PyTorch nn.Module equivalent of the logistic regression
+    
+    Note:
+        sklearn's binary LogisticRegression can have coef_ shape (1, n_features)
+        for efficiency. We convert this to (2, n_features) for binary classification
+        by using the negative of the coefficients for class 0.
     """
     class LogisticRegressionPyTorch(nn.Module):
         def __init__(self, n_features, n_classes=2):
@@ -54,13 +61,41 @@ def create_pytorch_lr_model(sklearn_lr, n_features):
         def forward(self, x):
             return self.linear(x)
     
-    pytorch_model = LogisticRegressionPyTorch(n_features, n_classes=2)
+    # Check if sklearn model is binary (1 class) or multi-class (2 classes)
+    coef_shape = sklearn_lr.coef_.shape
+    n_classes_sklearn = coef_shape[0]
+    
+    if n_classes_sklearn == 1:
+        # Binary classification: sklearn stores only class 1 coefficients
+        # We need to create class 0 coefficients as the negative of class 1
+        coef_class1 = sklearn_lr.coef_[0]  # Shape: (n_features,)
+        coef_class0 = -coef_class1  # Negative for class 0
+        
+        intercept_class1 = sklearn_lr.intercept_[0] if sklearn_lr.intercept_.ndim > 0 else sklearn_lr.intercept_
+        intercept_class0 = -intercept_class1
+        
+        # Stack to create (2, n_features) shape
+        coef_full = np.stack([coef_class0, coef_class1], axis=0)  # Shape: (2, n_features)
+        intercept_full = np.array([intercept_class0, intercept_class1])  # Shape: (2,)
+        
+        n_classes = 2
+    elif n_classes_sklearn == 2:
+        # Already has 2 classes
+        coef_full = sklearn_lr.coef_
+        intercept_full = sklearn_lr.intercept_
+        n_classes = 2
+    else:
+        # Multi-class (>2 classes) - not typical for binary classification but handle it
+        coef_full = sklearn_lr.coef_
+        intercept_full = sklearn_lr.intercept_
+        n_classes = n_classes_sklearn
+    
+    pytorch_model = LogisticRegressionPyTorch(n_features, n_classes=n_classes)
     
     # Copy weights from sklearn model
-    # sklearn LR: coef_ shape (n_classes, n_features), intercept_ shape (n_classes,)
     with torch.no_grad():
-        pytorch_model.linear.weight.data = torch.FloatTensor(sklearn_lr.coef_)
-        pytorch_model.linear.bias.data = torch.FloatTensor(sklearn_lr.intercept_)
+        pytorch_model.linear.weight.data = torch.FloatTensor(coef_full)
+        pytorch_model.linear.bias.data = torch.FloatTensor(intercept_full)
     
     pytorch_model.eval()
     return pytorch_model

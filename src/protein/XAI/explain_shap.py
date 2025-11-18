@@ -29,7 +29,9 @@ try:
 except ImportError:
     # Fallback for when running as script directly
     import sys
-    sys.path.insert(0, str(Path(__file__).parent))
+    xai_dir = Path(__file__).parent  # src/protein/XAI
+    if str(xai_dir) not in sys.path:
+        sys.path.insert(0, str(xai_dir))
     from model_loader import load_model
     from data_utils import prepare_data
 
