@@ -68,10 +68,15 @@ def create_pytorch_lr_model(sklearn_lr, n_features):
     if n_classes_sklearn == 1:
         # Binary classification: sklearn stores only class 1 coefficients
         # We need to create class 0 coefficients as the negative of class 1
+        # This is because in binary LR: P(y=0|x) = sigmoid(-(w @ x + b))
         coef_class1 = sklearn_lr.coef_[0]  # Shape: (n_features,)
         coef_class0 = -coef_class1  # Negative for class 0
         
-        intercept_class1 = sklearn_lr.intercept_[0] if sklearn_lr.intercept_.ndim > 0 else sklearn_lr.intercept_
+        # Handle intercept (can be scalar or array)
+        if sklearn_lr.intercept_.ndim == 0:
+            intercept_class1 = float(sklearn_lr.intercept_)
+        else:
+            intercept_class1 = sklearn_lr.intercept_[0]
         intercept_class0 = -intercept_class1
         
         # Stack to create (2, n_features) shape
