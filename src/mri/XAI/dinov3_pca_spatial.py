@@ -112,7 +112,7 @@ def main():
 
     # 1. Original MRI Slice
     # Rotate 90 degrees to match typical orientation if needed
-    axes[0].imshow(np.rot90(slice_2d), cmap='gray')
+    axes[0].imshow(slice_2d, cmap='gray')
     axes[0].set_title(f"Original MRI Slice\n(Slice {slice_idx})", fontsize=12, fontweight='bold')
     axes[0].axis('off')
 
