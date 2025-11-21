@@ -66,3 +66,5 @@ src/protein/explain_ig.py
 
 # Ignore experimental directories
 src/mri/dinov3/
+
+src/mri/XAI/features
