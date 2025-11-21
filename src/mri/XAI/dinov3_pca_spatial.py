@@ -165,8 +165,7 @@ def main():
     for i in range(3):
         pca_slice = pca_spatial_norm[..., i]
         
-        # Nearest neighbor interpolation to show grid clearly
-        im = axes[i+1].imshow(pca_slice, cmap=cmaps[i], vmin=0, vmax=1, interpolation='nearest')
+        im = axes[i+1].imshow(pca_slice, cmap=cmaps[i], vmin=0, vmax=1)  # Default: bilinear interpolation
         
         axes[i+1].set_title(f"Component {i+1}\n({pca.explained_variance_ratio_[i]:.1%} var)", 
                            fontsize=12, fontweight='bold')
