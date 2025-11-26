@@ -35,8 +35,8 @@ def main():
         img_data = img_nii.get_fdata()
         print(f"Image shape: {img_data.shape}")
         
-        # Extract middle slice (dim 2, same as extraction script default)
-        slice_idx = img_data.shape[2] // 2
+        # Extract slice (matching BrainIAC visualization logic: center - 15)
+        slice_idx = img_data.shape[2] // 2 - 15
         slice_2d = img_data[:, :, slice_idx]
         print(f"Extracted middle slice (index {slice_idx}), shape: {slice_2d.shape}")
         
