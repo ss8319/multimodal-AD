@@ -37,15 +37,15 @@ def extract_middle_slice(nii_path, slice_axis=2):
     img_nii = nib.load(nii_path)
     img_data = img_nii.get_fdata()
     
-    # Get middle slice along specified axis
+    # Get middle slice along specified axis (with -15 offset to match BrainIAC)
     if slice_axis == 0:
-        slice_idx = img_data.shape[0] // 2
+        slice_idx = img_data.shape[0] // 2 - 15
         slice_2d = img_data[slice_idx, :, :]
     elif slice_axis == 1:
-        slice_idx = img_data.shape[1] // 2
+        slice_idx = img_data.shape[1] // 2 - 15
         slice_2d = img_data[:, slice_idx, :]
     else:  # slice_axis == 2 (default)
-        slice_idx = img_data.shape[2] // 2
+        slice_idx = img_data.shape[2] // 2 - 15
         slice_2d = img_data[:, :, slice_idx]
     
     return slice_2d, slice_idx
@@ -163,9 +163,9 @@ def main():
     if args.images is None:
         base_path = "/home/ssim0068/data/multimodal-dataset/all_icbm/images"
         default_images = [
-            f"{base_path}/002_S_0413.nii.gz",
-            f"{base_path}/002_S_0559.nii.gz",
-            f"{base_path}/005_S_0602.nii.gz",
+            f"{base_path}/126_S_0606.nii.gz",
+            f"{base_path}/031_S_1209.nii.gz",
+            f"{base_path}/023_S_0926.nii.gz",
             f"{base_path}/007_S_1206.nii.gz"
         ]
         image_paths = default_images
