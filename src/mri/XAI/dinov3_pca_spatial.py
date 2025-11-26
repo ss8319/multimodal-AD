@@ -156,7 +156,7 @@ def main():
     fig, axes = plt.subplots(1, 4, figsize=(20, 5))
 
     # 1. Original MRI Slice
-    axes[0].imshow(slice_2d, cmap='gray')
+    axes[0].imshow(np.rot90(slice_2d), cmap='gray')
     axes[0].set_title(f"Original MRI Slice\n(Slice {slice_idx})", fontsize=12, fontweight='bold')
     axes[0].axis('off')
 
@@ -165,7 +165,7 @@ def main():
     for i in range(3):
         pca_slice = pca_spatial_norm[..., i]
         
-        im = axes[i+1].imshow(pca_slice, cmap=cmaps[i], vmin=0, vmax=1)  # Default: bilinear interpolation
+        im = axes[i+1].imshow(np.rot90(pca_slice), cmap=cmaps[i], vmin=0, vmax=1)  # Default: bilinear interpolation
         
         axes[i+1].set_title(f"Component {i+1}\n({pca.explained_variance_ratio_[i]:.1%} var)", 
                            fontsize=12, fontweight='bold')
