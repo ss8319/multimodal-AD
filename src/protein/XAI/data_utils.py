@@ -15,9 +15,16 @@ try:
     from ..feature_utils import load_scaler_feature_columns, align_features_to_scaler
 except ImportError:
     import sys
-    sys.path.insert(0, str(Path(__file__).parent.parent))
-    from dataset import ProteinDataLoader
-    from feature_utils import load_scaler_feature_columns, align_features_to_scaler
+    # When running as script, add src/protein to path
+    script_dir = Path(__file__).parent.parent  # src/protein/XAI -> src/protein
+    if str(script_dir) not in sys.path:
+        sys.path.insert(0, str(script_dir))
+    # Also add src to path for package-style imports
+    src_dir = script_dir.parent  # src/protein -> src
+    if str(src_dir) not in sys.path:
+        sys.path.insert(0, str(src_dir))
+    from protein.dataset import ProteinDataLoader
+    from protein.feature_utils import load_scaler_feature_columns, align_features_to_scaler
 
 
 class DataPreparationError(Exception):

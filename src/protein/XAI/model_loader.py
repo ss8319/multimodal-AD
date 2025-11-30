@@ -17,8 +17,15 @@ try:
     from ..model import NeuralNetworkClassifier, NeuralNetwork
 except ImportError:
     import sys
-    sys.path.insert(0, str(Path(__file__).parent.parent))
-    from model import NeuralNetworkClassifier, NeuralNetwork
+    # When running as script, add src/protein to path
+    script_dir = Path(__file__).parent.parent  # src/protein/XAI -> src/protein
+    if str(script_dir) not in sys.path:
+        sys.path.insert(0, str(script_dir))
+    # Also add src to path for package-style imports
+    src_dir = script_dir.parent  # src/protein -> src
+    if str(src_dir) not in sys.path:
+        sys.path.insert(0, str(src_dir))
+    from protein.model import NeuralNetworkClassifier, NeuralNetwork
 
 
 class ModelLoaderError(Exception):
